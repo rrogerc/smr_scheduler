@@ -1,19 +1,22 @@
 name: "📅 Generate Monthly Schedule"
 
 on:
-  # Scheduled run on the 25th of every month at 06:00 UTC
   schedule:
     - cron: '0 6 25 * *'
-  # Manual trigger button in the GitHub UI
   workflow_dispatch: {}
+
+permissions:
+  contents: write  # <-- this gives GITHUB_TOKEN push access
 
 jobs:
   generate:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) checkout code
+      # 1) checkout code with credentials
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: true
 
       # 2) set up Python
       - name: Set up Python
@@ -21,17 +24,16 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3) install dependencies from requirements.txt
+      # 3) install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4) compute next month/year with date CLI (avoids YAML here-doc pain)
+      # 4) compute next month/year
       - name: Compute next-month year & month
         id: vars
         run: |
-          # get first of this month, add 32 days → into next month
           first_of_month=$(date +%Y-%m-1)
           next=$(date -d "$first_of_month +32 days" +%Y-%m)
           year=${next%-*}
@@ -39,7 +41,7 @@ jobs:
           echo "month=$month" >> $GITHUB_OUTPUT
           echo "year=$year"   >> $GITHUB_OUTPUT
 
-      # 5) run the scheduler
+      # 5) generate schedule
       - name: Generate schedule
         run: |
           python scheduler.py \
@@ -48,11 +50,11 @@ jobs:
             --year  ${{ steps.vars.outputs.year }} \
             --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
 
-      # 6) commit & push any changes back to repo
+      # 6) commit & push
       - name: Commit & push schedule
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add schedule_*.xlsx
-          git diff --quiet || git commit -m "📅 Monthly schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
+          git diff --cached --quiet || git commit -m "📅 Monthly schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
           git push

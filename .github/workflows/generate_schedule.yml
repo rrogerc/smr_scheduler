@@ -1,9 +1,10 @@
 name: "📅 Generate Monthly Schedule"
 
 on:
+  # Scheduled run on the 25th of every month at 06:00 UTC
   schedule:
-    # At 06:00 UTC on day-of-month 25
     - cron: '0 6 25 * *'
+  # Manual trigger button in the GitHub UI
   workflow_dispatch: {}
 
 jobs:
@@ -26,22 +27,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4) compute next month/year
+      # 4) compute next month/year with date CLI (avoids YAML here-doc pain)
       - name: Compute next-month year & month
         id: vars
         run: |
-          python - << 'EOF'
-import datetime, os
-today = datetime.date.today()
-first = today.replace(day=1)
-# jump to next month
-nm = first + datetime.timedelta(days=32)
-y, m = nm.year, nm.month
-# export for GH Actions
-with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-    fh.write(f"month={m}\n")
-    fh.write(f"year={y}\n")
-EOF
+          # get first of this month, add 32 days → into next month
+          first_of_month=$(date +%Y-%m-1)
+          next=$(date -d "$first_of_month +32 days" +%Y-%m)
+          year=${next%-*}
+          month=${next#*-}
+          echo "month=$month" >> $GITHUB_OUTPUT
+          echo "year=$year"   >> $GITHUB_OUTPUT
 
       # 5) run the scheduler
       - name: Generate schedule
@@ -52,10 +48,10 @@ EOF
             --year  ${{ steps.vars.outputs.year }} \
             --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
 
-      # 6) commit & push any changes
+      # 6) commit & push any changes back to repo
       - name: Commit & push schedule
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add schedule_*.xlsx
           git diff --quiet || git commit -m "📅 Monthly schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"

@@ -60,6 +60,9 @@ def assign_slots(people, month, year):
         for p in people:
             p['assignments'][week_no] = 0
         for date in sorted(dates):
+            # Only assign on weekdays
+            if date.weekday() >= 5:
+                continue
             weekday = calendar.day_name[date.weekday()]
             calendar_assign.setdefault(date, {})
             for slot in TIME_SLOTS:
@@ -109,8 +112,11 @@ def build_calendar_sheet(writer, calendar_assign, month, year):
         rows.append([str(day) if day != 0 else '' for day, wd in week])
         # slot rows
         for slot in TIME_SLOTS:
-            rows.append([f"{slot}: {', '.join(calendar_assign.get(datetime.date(year, month, day), {
-            }).get(slot, []))}" if day != 0 and wd < 5 else '' for day, wd in week])
+            rows.append([
+                f"{slot}: {', '.join(calendar_assign.get(
+                    datetime.date(year, month, day), {}).get(slot, []))}"
+                if day != 0 and wd < 5 else '' for day, wd in week
+            ])
     df = pd.DataFrame(
         rows, columns=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
     ws = writer.book.add_worksheet('Monthly Schedule')
@@ -136,19 +142,24 @@ def build_person_sheet(writer, person_assignments):
 
 
 def build_log_sheet(writer, calendar_assign, warnings):
-    # Flatten assignment summary
+    # Flatten assignment summary, excluding weekends
     assign_rows = []
     for date, slots in sorted(calendar_assign.items()):
+        if date.weekday() >= 5:  # skip Saturday & Sunday
+            continue
         for slot, names in slots.items():
-            assign_rows.append({'Date': date.strftime(
-                '%Y-%m-%d'), 'Slot': slot, 'Assigned': ', '.join(names)})
+            assign_rows.append({
+                'Date': date.strftime('%Y-%m-%d'),
+                'Slot': slot,
+                'Assigned': ', '.join(names)
+            })
     dfa = pd.DataFrame(assign_rows)
     dfw = pd.DataFrame([{'Warning': w} for w in warnings])
     ws = writer.book.add_worksheet('Log')
     writer.sheets['Log'] = ws
     ws.write(0, 0, 'Assignment Summary')
     dfa.to_excel(writer, sheet_name='Log', startrow=1, index=False)
-    start = len(dfa)+3
+    start = len(dfa) + 3
     ws.write(start, 0, 'Warnings')
     dfw.to_excel(writer, sheet_name='Log', startrow=start+1, index=False)
     ws.set_column(0, 2, 25)

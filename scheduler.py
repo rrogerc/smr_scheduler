@@ -76,7 +76,7 @@ def assign_slots(people, month, year):
             for slot in TIME_SLOTS:
                 # assign senior
                 seniors = [p for p in people if p['senior']
-                           and slot in p['availability'][weekday]]
+                           and slot in p['availability'].get(weekday, [])]
                 eligible = [
                     p for p in seniors if p['assignments'][week_no] < 2]
                 if not eligible:
@@ -91,8 +91,8 @@ def assign_slots(people, month, year):
 
                 # assign remaining
                 needed = 3 - len(assigned)
-                pool = [
-                    p for p in people if p not in assigned and slot in p['availability'][weekday]]
+                pool = [p for p in people if p not in assigned and slot in p['availability'].get(
+                    weekday, [])]
                 eligible_pool = [
                     p for p in pool if p['assignments'][week_no] < 2]
                 if len(eligible_pool) < needed:
@@ -120,7 +120,7 @@ def build_calendar_sheet(writer, calendar_assign, month, year):
     # Prepare rows: for each week: 1 date row + 4 slot rows
     rows = []
     for week in weeks:
-        # date row
+        # date row (include all month days, including weekends)
         date_row = []
         for day, wd in week:
             if day == 0:
@@ -128,11 +128,12 @@ def build_calendar_sheet(writer, calendar_assign, month, year):
             else:
                 date_row.append(str(day))
         rows.append(date_row)
-        # slot rows (with time label in each cell)
+
+        # slot rows (with time label in each cell, weekends blank)
         for slot in TIME_SLOTS:
             slot_row = []
             for day, wd in week:
-                if day == 0:
+                if day == 0 or wd >= 5:
                     slot_row.append('')
                 else:
                     dt = datetime.date(year, month, day)

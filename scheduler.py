@@ -123,7 +123,7 @@ def build_calendar_sheet(writer, calendar_assign, month, year):
         # date row
         date_row = []
         for day, wd in week:
-            if day == 0 or wd >= 5:
+            if day == 0:
                 date_row.append('')
             else:
                 date_row.append(str(day))
@@ -132,7 +132,7 @@ def build_calendar_sheet(writer, calendar_assign, month, year):
         for slot in TIME_SLOTS:
             slot_row = []
             for day, wd in week:
-                if day == 0 or wd >= 5:
+                if day == 0:
                     slot_row.append('')
                 else:
                     dt = datetime.date(year, month, day)

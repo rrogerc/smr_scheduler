@@ -53,7 +53,7 @@ def get_weekly_dates(month, year):
     weeks = {}
     cal = calendar.Calendar()
     for dt in cal.itermonthdates(year, month):
-        if dt.month != month or dt.weekday() >= 5:
+        if dt.month != month:
             continue
         wk = dt.isocalendar()[1]
         weeks.setdefault(wk, []).append(dt)

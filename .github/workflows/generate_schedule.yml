@@ -41,7 +41,12 @@ jobs:
           echo "month=$month" >> $GITHUB_OUTPUT
           echo "year=$year"   >> $GITHUB_OUTPUT
 
-      # 5) generate schedule
+      # 5) pull spreadsheet
+      - name: pull spreadsheet
+        run: |
+          python sync_sheet.py
+
+      # 6) generate schedule
       - name: Generate schedule
         run: |
           python scheduler.py \
@@ -50,7 +55,7 @@ jobs:
             --year  ${{ steps.vars.outputs.year }} \
             --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
 
-      # 6) commit & push
+      # 7) commit & push
       - name: Commit & push schedule
         run: |
           git config user.name  "github-actions[bot]"

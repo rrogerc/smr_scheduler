@@ -103,7 +103,7 @@ def build_calendar_sheet(writer, cal_assign, month, year):
     ws = wb.add_worksheet('Monthly Schedule')
     writer.sheets['Monthly Schedule'] = ws
 
-    # ─── Formats (all Arial) ────────────────────────────────────────────────
+    # ─── Formats ─────────────────────────────────────────────────────────────
     title_fmt = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'bold': True, 'font_size': 16
     })
@@ -115,70 +115,98 @@ def build_calendar_sheet(writer, cal_assign, month, year):
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'bold': True, 'font_size': 12, 'border': 1
     })
-    cell_fmt_light = wb.add_format({
+    out_fmt = wb.add_format({  # full-block for out-of-month
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'bg_color': '#A9A9A9'
+    })
+    cell_light = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'border': 1, 'font_size': 10
     })
-    cell_fmt_dark = wb.add_format({
+    cell_dark = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
-        'border': 1, 'font_size': 10, 'bg_color': '#F2F2F2'
+        'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
     })
-    time_fmt_light = wb.add_format({
+    time_light = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'bold': True, 'border': 1, 'font_size': 10
     })
-    time_fmt_dark = wb.add_format({
+    time_dark = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
-        'bold': True, 'border': 1, 'font_size': 10, 'bg_color': '#F2F2F2'
+        'bold': True, 'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
     })
 
-    # ─── Title Row ────────────────────────────────────────────────────────────
-    month_name = calendar.month_name[month]
-    ws.merge_range(0, 0, 0, 8, f"{month_name} {year}", title_fmt)
-
-    # ─── Headers ──────────────────────────────────────────────────────────────
+    # ─── Title & Headers ────────────────────────────────────────────────────
     days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    ws.write(1, 0, "Time Slot", header_fmt)
-    ws.set_column(0, 0, 15)
-    for idx, day in enumerate(days):
-        ws.write(1, idx + 1, day, header_fmt)
-        ws.set_column(idx + 1, idx + 1, 18)
+    total_cols = 1 + len(days)*2
+    ws.merge_range(0, 0, 0, total_cols-1,
+                   f"{calendar.month_name[month]} {year}", title_fmt)
+
+    ws.set_row(1, 20)
+    ws.set_column(0, 0, 20)  # Time‐Slot col wider
+    for i, d in enumerate(days):
+        c0 = 1 + i*2
+        ws.set_column(c0,   c0,   4)   # date-number col thinner
+        ws.set_column(c0+1, c0+1, 18)  # assignment col
+        ws.merge_range(1, c0, 1, c0+1, d, header_fmt)
 
     # ─── Calendar Grid ───────────────────────────────────────────────────────
     cal = calendar.Calendar()
     weeks = cal.monthdays2calendar(year, month)
     row = 2
+    rows_per_day = len(TIME_SLOTS) * 3  # 12 rows per day
 
-    for week in weeks:
-        # 1) Day-number row
-        for c, (day, wd) in enumerate(week):
+    for week_idx, week in enumerate(weeks):
+        block_start = row
+
+        # 1) choose week‐level fmt for the Time-Slot column
+        week_time_fmt = time_dark if (week_idx % 2 == 0) else time_light
+
+        # 2) Merge out-of-month columns into one grey block
+        for i, (day, _) in enumerate(week):
+            c0 = 1 + i*2
             if day == 0:
-                ws.write_blank(row, c + 1, '', cell_fmt_light)
-            else:
-                ws.write(row, c + 1, day, date_fmt)
-        ws.set_row(row, 24)   # taller for date prominence
-        row += 1
+                ws.merge_range(
+                    block_start,   c0,
+                    block_start + rows_per_day - 1, c0+1,
+                    '', out_fmt
+                )
 
-        # 2) For each time slot: merged label + three centered name rows
+        # 3) Merge in-month date numbers down left subcol
+        for i, (day, _) in enumerate(week):
+            c0 = 1 + i*2
+            if day != 0:
+                ws.merge_range(
+                    block_start,   c0,
+                    block_start + rows_per_day - 1, c0,
+                    day, date_fmt
+                )
+
+        # 4) Time-slot labels in col 0, using week-alternation
         for slot_idx, slot in enumerate(TIME_SLOTS):
-            # pick light/dark for alternating blocks
-            time_fmt = time_fmt_light if slot_idx % 2 == 0 else time_fmt_dark
-            cell_fmt = cell_fmt_light if slot_idx % 2 == 0 else cell_fmt_dark
+            r0 = block_start + slot_idx*3
+            ws.merge_range(r0, 0, r0+2, 0, slot, week_time_fmt)
 
-            # slot label merged down 3 rows in col A
-            ws.merge_range(row, 0, row + 2, 0, slot, time_fmt)
+        # 5) Assignments: alternate by slot_idx as before
+        for i, (day, _) in enumerate(week):
+            c1 = 1 + i*2 + 1
+            if day == 0:
+                continue
+            dt = datetime.date(year, month, day)
+            for slot_idx, slot in enumerate(TIME_SLOTS):
+                names = cal_assign.get(dt, {}).get(slot, [])
+                # choose per-slot shading
+                row_fmt = cell_light if (slot_idx % 2 == 0) else cell_dark
+                for sub in range(3):
+                    r = block_start + slot_idx*3 + sub
+                    ws.write(r, c1, names[sub] if sub <
+                             len(names) else '', row_fmt)
 
-            for sub in range(3):
-                for c, (day, wd) in enumerate(week):
-                    if day == 0:
-                        ws.write_blank(row, c + 1, '', cell_fmt)
-                    else:
-                        dt = datetime.date(year, month, day)
-                        names = cal_assign.get(dt, {}).get(slot, [])
-                        name = names[sub] if sub < len(names) else ''
-                        ws.write(row, c + 1, name, cell_fmt)
-                ws.set_row(row, 15)  # shorter row for names
-                row += 1
+        # 6) Set assignment rows height
+        for r in range(block_start, block_start + rows_per_day):
+            ws.set_row(r, 15)
+
+        row += rows_per_day
 
 
 def build_person_sheet(writer, person_assign):

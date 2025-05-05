@@ -1,22 +1,24 @@
+#!/usr/bin/env python3
 # schedule.py
 # Generates a monthly schedule calendar and per-person summary from availability responses.
-# Writes calendar, person schedule, and detailed logs (assignments + warnings) to Excel with styled formatting.
-# Usage: python schedule.py --input availability.xlsx --month 5 --year 2025 --output schedule_may_2025.xlsx
+# Also emits per-person .ics feeds and links them in the Excel.
+# Usage:
+#   python schedule.py \
+#     --input availability.xlsx \
+#     --month 5 --year 2025 \
+#     --output schedule_may_2025.xlsx \
+#     --cal-url-base https://raw.githubusercontent.com/you/yourrepo/main/ics
 
+import os
 import pandas as pd
 import datetime
 import calendar
 import argparse
 
-# Scheduling algorithm:
-# Greedy weekly balanced assignment. For each ISO week in the month:
-#  - Track per-person assignment count (cap aimed at 2/week).
-#  - For each weekday date and each time slot:
-#    * Assign 1 senior with fewest assigns.
-#    * Assign remaining 2 staff with fewest assigns.
-#    * Log warnings if staffing incomplete.
-
+# ─── CONFIG ────────────────────────────────────────────────────────────────
 TIME_SLOTS = ["9AM-11AM", "11AM-1PM", "1PM-3PM", "3PM-5PM"]
+
+# ─── LOAD AVAILABILITY ──────────────────────────────────────────────────────
 
 
 def load_availability(path):
@@ -31,12 +33,19 @@ def load_availability(path):
         availability = {}
         for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']:
             raw = row.get(f'When is your weekly availability? [{day}]', '')
-            slots = [] if pd.isna(raw) or not raw else [s.strip()
-                                                        for s in str(raw).split(',') if s.strip()]
+            slots = [] if pd.isna(raw) or not raw else [
+                s.strip() for s in str(raw).split(',') if s.strip()
+            ]
             availability[day] = set(slots)
-        people.append({'name': name, 'senior': senior,
-                      'availability': availability, 'assignments': {}})
+        people.append({
+            'name': name,
+            'senior': senior,
+            'availability': availability,
+            'assignments': {}
+        })
     return people
+
+# ─── WEEKLY DATES ──────────────────────────────────────────────────────────
 
 
 def get_weekly_dates(month, year):
@@ -49,25 +58,32 @@ def get_weekly_dates(month, year):
         weeks.setdefault(wk, []).append(dt)
     return weeks
 
+# ─── ASSIGN SLOTS ──────────────────────────────────────────────────────────
+
 
 def assign_slots(people, month, year):
     cal_assign = {}
     person_assign = {p['name']: [] for p in people}
     warnings = []
     weeks = get_weekly_dates(month, year)
+
     for wno, dates in weeks.items():
+        # reset weekly counts
         for p in people:
             p['assignments'][wno] = 0
+
         for dt in sorted(dates):
-            # skip weekends
-            if dt.weekday() >= 5:
+            if dt.weekday() >= 5:  # skip weekends
                 continue
             dayname = calendar.day_name[dt.weekday()]
             cal_assign.setdefault(dt, {})
+
             for slot in TIME_SLOTS:
-                # pick senior
-                seniors = [p for p in people if p['senior']
-                           and slot in p['availability'][dayname]]
+                # pick one senior
+                seniors = [
+                    p for p in people
+                    if p['senior'] and slot in p['availability'][dayname]
+                ]
                 elig = [p for p in seniors if p['assignments']
                         [wno] < 2] or seniors
                 if not elig:
@@ -77,33 +93,86 @@ def assign_slots(people, month, year):
                     sel = min(elig, key=lambda p: (
                         p['assignments'][wno], p['name']))
                     assigned = [sel]
-                # fill others
-                need = 3-len(assigned)
+
+                # fill remaining 2
+                need = 3 - len(assigned)
                 pool = [
-                    p for p in people if p not in assigned and slot in p['availability'][dayname]]
+                    p for p in people
+                    if p not in assigned and slot in p['availability'][dayname]
+                ]
                 epool = [p for p in pool if p['assignments'][wno] < 2] or pool
                 if len(epool) < need:
                     warnings.append(
                         f"Only {len(epool)+len(assigned)} for {dt} {slot}")
                 epool.sort(key=lambda p: (p['assignments'][wno], p['name']))
                 assigned += epool[:need]
+
                 # record
                 cal_assign[dt][slot] = [p['name'] for p in assigned]
                 for p in assigned:
                     p['assignments'][wno] += 1
                     person_assign[p['name']].append((dt, slot))
+
     return cal_assign, person_assign, warnings
+
+# ─── ICS GENERATION ────────────────────────────────────────────────────────
+
+
+def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
+    """
+    Writes <output_dir>/First_Last.ics with one VEVENT per shift,
+    returns the public URL: base_url/First_Last.ics
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    fname = person_name.replace(" ", "_") + ".ics"
+    path = os.path.join(output_dir, fname)
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        f"PRODID:-//schedule-script//EN",
+    ]
+
+    for dt, slot in assignments:
+        # map slot to hours
+        start_h, end_h = {
+            "9AM-11AM":  (9, 11),
+            "11AM-1PM":  (11, 13),
+            "1PM-3PM":   (13, 15),
+            "3PM-5PM":   (15, 17),
+        }[slot]
+        dtstart = dt.strftime("%Y%m%d") + f"T{start_h:02}00"
+        dtend = dt.strftime("%Y%m%d") + f"T{end_h:02}00"
+        uid = f"{person_name}-{dt.isoformat()}-{slot}@schedule"
+
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}",
+            f"DTSTART:{dtstart}",
+            f"DTEND:{dtend}",
+            f"SUMMARY:{person_name} shift ({slot})",
+            "END:VEVENT",
+        ]
+
+    lines.append("END:VCALENDAR")
+
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+    return f"{base_url.rstrip('/')}/{fname}"
+
+# ─── CALENDAR SHEET ───────────────────────────────────────────────────────
 
 
 def build_calendar_sheet(writer, cal_assign, month, year):
     import datetime
     import calendar
-
     wb = writer.book
     ws = wb.add_worksheet('Monthly Schedule')
     writer.sheets['Monthly Schedule'] = ws
 
-    # ─── Formats ─────────────────────────────────────────────────────────────
+    # -- Formats
     title_fmt = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'bold': True, 'font_size': 16
     })
@@ -115,7 +184,7 @@ def build_calendar_sheet(writer, cal_assign, month, year):
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'bold': True, 'font_size': 12, 'border': 1
     })
-    out_fmt = wb.add_format({  # full-block for out-of-month
+    out_fmt = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'border': 1, 'bg_color': '#A9A9A9'
     })
@@ -136,137 +205,175 @@ def build_calendar_sheet(writer, cal_assign, month, year):
         'bold': True, 'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
     })
 
-    # ─── Title & Headers ────────────────────────────────────────────────────
+    # -- Title & Headers
     days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     total_cols = 1 + len(days)*2
     ws.merge_range(0, 0, 0, total_cols-1,
                    f"{calendar.month_name[month]} {year}", title_fmt)
-
     ws.set_row(1, 20)
-    ws.set_column(0, 0, 20)  # Time‐Slot col wider
+    ws.set_column(0, 0, 20)  # Time-Slot col
     for i, d in enumerate(days):
         c0 = 1 + i*2
-        ws.set_column(c0,   c0,   4)   # date-number col thinner
+        ws.set_column(c0,   c0,   4)   # date col
         ws.set_column(c0+1, c0+1, 18)  # assignment col
         ws.merge_range(1, c0, 1, c0+1, d, header_fmt)
 
-    # ─── Calendar Grid ───────────────────────────────────────────────────────
+    # -- Grid
     cal = calendar.Calendar()
     weeks = cal.monthdays2calendar(year, month)
     row = 2
-    rows_per_day = len(TIME_SLOTS) * 3  # 12 rows per day
+    rows_per_day = len(TIME_SLOTS)*3
 
     for week_idx, week in enumerate(weeks):
-        block_start = row
+        start_row = row
+        # week-alt for Time-Slot labels
+        wk_fmt = time_dark if (week_idx % 2 == 0) else time_light
 
-        # 1) choose week‐level fmt for the Time-Slot column
-        week_time_fmt = time_dark if (week_idx % 2 == 0) else time_light
-
-        # 2) Merge out-of-month columns into one grey block
+        # merge out-of-month columns
         for i, (day, _) in enumerate(week):
             c0 = 1 + i*2
             if day == 0:
                 ws.merge_range(
-                    block_start,   c0,
-                    block_start + rows_per_day - 1, c0+1,
+                    start_row, c0,
+                    start_row+rows_per_day-1, c0+1,
                     '', out_fmt
                 )
 
-        # 3) Merge in-month date numbers down left subcol
+        # merge in-month date numbers
         for i, (day, _) in enumerate(week):
             c0 = 1 + i*2
             if day != 0:
                 ws.merge_range(
-                    block_start,   c0,
-                    block_start + rows_per_day - 1, c0,
+                    start_row, c0,
+                    start_row+rows_per_day-1, c0,
                     day, date_fmt
                 )
 
-        # 4) Time-slot labels in col 0, using week-alternation
-        for slot_idx, slot in enumerate(TIME_SLOTS):
-            r0 = block_start + slot_idx*3
-            ws.merge_range(r0, 0, r0+2, 0, slot, week_time_fmt)
+        # Time-Slot labels in col 0
+        for si, slot in enumerate(TIME_SLOTS):
+            r0 = start_row + si*3
+            ws.merge_range(r0, 0, r0+2, 0, slot, wk_fmt)
 
-        # 5) Assignments: alternate by slot_idx as before
+        # Assignments alternate by slot index
         for i, (day, _) in enumerate(week):
             c1 = 1 + i*2 + 1
             if day == 0:
                 continue
             dt = datetime.date(year, month, day)
-            for slot_idx, slot in enumerate(TIME_SLOTS):
+            for si, slot in enumerate(TIME_SLOTS):
                 names = cal_assign.get(dt, {}).get(slot, [])
-                # choose per-slot shading
-                row_fmt = cell_light if (slot_idx % 2 == 0) else cell_dark
+                fmt = cell_light if (si % 2 == 0) else cell_dark
                 for sub in range(3):
-                    r = block_start + slot_idx*3 + sub
+                    r = start_row + si*3 + sub
                     ws.write(r, c1, names[sub] if sub <
-                             len(names) else '', row_fmt)
+                             len(names) else '', fmt)
 
-        # 6) Set assignment rows height
-        for r in range(block_start, block_start + rows_per_day):
+        # compact row heights
+        for r in range(start_row, start_row+rows_per_day):
             ws.set_row(r, 15)
 
         row += rows_per_day
 
+# ─── PERSON SHEET ──────────────────────────────────────────────────────────
 
-def build_person_sheet(writer, person_assign):
+
+def build_person_sheet(writer, person_assign, ics_links):
     wb = writer.book
     ws = wb.add_worksheet('Person Schedule')
+    writer.sheets['Person Schedule'] = ws
+
     df = pd.DataFrame([
-        {'Name': name, 'Total Shifts': len(a), 'Assignments': "; ".join(
-            f"{d.strftime('%Y-%m-%d')} {s}" for d, s in a)}
-        for name, a in person_assign.items()
+        {'Name': name,
+         'Total Shifts': len(assigns),
+         'Calendar URL': ics_links.get(name, '')}
+        for name, assigns in person_assign.items()
     ])
+
     df.to_excel(writer, sheet_name='Person Schedule', index=False)
-    # optional: style header
-    hdr_fmt = wb.add_format({'bold': True, 'bg_color': '#D9D9D9', 'border': 1})
-    for col in range(len(df.columns)):
-        ws.write(0, col, df.columns[col], hdr_fmt)
-        ws.set_column(col, col, 30)
+
+    hdr_fmt = wb.add_format({
+        'bold': True, 'bg_color': '#D9D9D9', 'border': 1, 'font_name': 'Arial'
+    })
+    for col_idx, col in enumerate(df.columns):
+        ws.write(0, col_idx, col, hdr_fmt)
+        width = (12 if col == 'Total Shifts' else 40) if col != 'Name' else 20
+        ws.set_column(col_idx, col_idx, width)
+
+# ─── LOG SHEET ─────────────────────────────────────────────────────────────
 
 
 def build_log_sheet(writer, cal_assign, warnings):
     wb = writer.book
     ws = wb.add_worksheet('Log')
     writer.sheets['Log'] = ws
-    # Logs: assignments
+
     rows = []
     for dt, slots in sorted(cal_assign.items()):
         if dt.weekday() >= 5:
             continue
         for slot, names in slots.items():
-            rows.append({'Date': dt.strftime('%Y-%m-%d'),
-                        'Slot': slot, 'Assigned': ', '.join(names)})
+            rows.append({
+                'Date': dt.strftime('%Y-%m-%d'),
+                'Slot': slot,
+                'Assigned': ', '.join(names)
+            })
     df1 = pd.DataFrame(rows)
     df1.to_excel(writer, sheet_name='Log', startrow=1, index=False)
-    # Warnings
+
     start = len(rows)+3
     ws.write(start, 0, 'Warnings')
     df2 = pd.DataFrame([{'Warning': w} for w in warnings])
     df2.to_excel(writer, sheet_name='Log', startrow=start+1, index=False)
-    # formatting
-    fmt_hdr = wb.add_format({'bold': True, 'bg_color': '#D9D9D9', 'border': 1})
+
+    fmt_hdr = wb.add_format({
+        'bold': True, 'bg_color': '#D9D9D9', 'border': 1
+    })
+    # header for assignments and warnings
     for col in range(3):
-        ws.write(0 if col < len(df1.columns) else start, col,
-                 df1.columns[col] if col < len(df1.columns) else 'Warnings', fmt_hdr)
+        ws.write(
+            0 if col < len(df1.columns) else start,
+            col,
+            df1.columns[col] if col < len(df1.columns) else 'Warnings',
+            fmt_hdr
+        )
     ws.set_column(0, 2, 25)
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--input', required=True)
-    p.add_argument('--month', type=int, required=True)
-    p.add_argument('--year', type=int, required=True)
-    p.add_argument('--output', default=None)
+    p.add_argument('--input',       required=True)
+    p.add_argument('--month',       type=int, required=True)
+    p.add_argument('--year',        type=int, required=True)
+    p.add_argument('--output',      default=None)
+    p.add_argument(
+        '--cal-url-base',
+        required=True,
+        help="Public URL base for the generated ics files"
+    )
     args = p.parse_args()
+
     cal_assign, person_assign, warnings = assign_slots(
-        load_availability(args.input), args.month, args.year)
+        load_availability(args.input),
+        args.month, args.year
+    )
+
+    # write out per-person ICS and collect URLs
+    ics_links = {}
+    for name, assigns in person_assign.items():
+        ics_links[name] = write_person_ics(
+            name, assigns, args.cal_url_base
+        )
+
     out = args.output or f"schedule_{args.month}_{args.year}.xlsx"
     with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
         build_calendar_sheet(writer, cal_assign, args.month, args.year)
-        build_person_sheet(writer, person_assign)
+        build_person_sheet(writer, person_assign, ics_links)
         build_log_sheet(writer, cal_assign, warnings)
+
     print(f"Written schedule + logs to {out}")
+    print(f".ics files in ./ics/, served at {args.cal_url_base}/<Name>.ics")
 
 
 if __name__ == '__main__':

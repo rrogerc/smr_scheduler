@@ -2,4 +2,5 @@ python scheduler.py \
 	--input availability.xlsx \
 	--month 5 \
 	--year 2025 \
-	--output schedule_5_2025.xlsx
+	--output schedule_5_2025.xlsx \
+	--cal-url-base https://raw.githubusercontent.com/Meghanuni/smr_scheduler/main/ics

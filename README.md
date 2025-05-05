@@ -26,6 +26,7 @@ This will run the program manually to remake the schedule for the next month.
 Figure out a way to remove people from the form
 - Only include people from an official member spreadsheet?
 - Only include submissions that in certain dates (like term)?
+  - Only allow August to April responses?
 
 A form response indicating which month onward the changes will effect when someone submits a form
 
@@ -42,4 +43,4 @@ Allow a way to remake the schedule for the current month.
 
 Allow swapping of shifts
 
-
+In the calendar allow special events

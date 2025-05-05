@@ -148,7 +148,8 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
         lines += [
             "BEGIN:VEVENT",
             f"UID:{uid}",
-            f"DTSTAMP:{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}",
+            f"DTSTAMP:{datetime.datetime.now(
+                datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
             f"DTSTART:{dtstart}",
             f"DTEND:{dtend}",
             f"SUMMARY:{person_name} shift ({slot})",

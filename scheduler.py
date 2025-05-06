@@ -386,6 +386,8 @@ def build_log_sheet(writer, cal_assign, warnings):
 
 
 def main():
+    import pandas as pd
+
     p = argparse.ArgumentParser()
     p.add_argument('--input',       required=True)
     p.add_argument('--month',       type=int, required=True)
@@ -398,26 +400,34 @@ def main():
     )
     args = p.parse_args()
 
+    # 1) assign slots
     cal_assign, person_assign, warnings = assign_slots(
         load_availability(args.input),
         args.month, args.year
     )
 
-    # write out per-person ICS and collect URLs
+    # 2) write out per-person ICS and collect URLs
+    ics_folder = "docs/ics"
     ics_links = {}
     for name, assigns in person_assign.items():
         ics_links[name] = write_person_ics(
-            name, assigns, args.cal_url_base
+            name,
+            assigns,
+            args.cal_url_base,
+            output_dir=ics_folder
         )
 
+    # 3) write the Excel
     out = args.output or f"schedule_{args.month}_{args.year}.xlsx"
     with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
         build_calendar_sheet(writer, cal_assign, args.month, args.year)
         build_person_sheet(writer, person_assign, ics_links)
         build_log_sheet(writer, cal_assign, warnings)
 
+    # 4) summary output
     print(f"Written schedule + logs to {out}")
-    print(f".ics files in ./ics/, served at {args.cal_url_base}/<Name>.ics")
+    print(f".ics files in {ics_folder}, served at {
+          args.cal_url_base}/<Full Name>.ics")
 
 
 if __name__ == '__main__':

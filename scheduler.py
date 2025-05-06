@@ -123,6 +123,9 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
     Writes <output_dir>/First_Last.ics with one VEVENT per shift,
     returns the public URL: base_url/First_Last.ics
     """
+    import os
+    import datetime
+
     os.makedirs(output_dir, exist_ok=True)
     fname = person_name.replace(" ", "_") + ".ics"
     path = os.path.join(output_dir, fname)
@@ -130,7 +133,9 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        f"PRODID:-//schedule-script//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "PRODID:-//schedule-script//EN",
     ]
 
     for dt, slot in assignments:
@@ -141,8 +146,10 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
             "1PM-3PM":   (13, 15),
             "3PM-5PM":   (15, 17),
         }[slot]
-        dtstart = dt.strftime("%Y%m%d") + f"T{start_h:02}00"
-        dtend = dt.strftime("%Y%m%d") + f"T{end_h:02}00"
+
+        # Emit UTC timestamps with seconds and 'Z'
+        dtstart = dt.strftime("%Y%m%d") + f"T{start_h:02}00" + "00Z"
+        dtend = dt.strftime("%Y%m%d") + f"T{end_h:02}00" + "00Z"
         uid = f"{person_name}-{dt.isoformat()}-{slot}@schedule"
 
         lines += [

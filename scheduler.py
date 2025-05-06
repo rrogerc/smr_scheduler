@@ -120,16 +120,17 @@ def assign_slots(people, month, year):
 
 def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
     """
-    Writes <output_dir>/First_Last.ics with one VEVENT per shift,
-    returns the public URL: base_url/First_Last.ics
+    Writes <output_dir>/First_Last.ics with one VEVENT per shift.
+    Returns the public URL: base_url/First_Last.ics
     """
     import os
-    import datetime
+    from datetime import datetime, timezone
 
     os.makedirs(output_dir, exist_ok=True)
     fname = person_name.replace(" ", "_") + ".ics"
     path = os.path.join(output_dir, fname)
 
+    # VCALENDAR header with minimal required properties
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -147,16 +148,24 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
             "3PM-5PM":   (15, 17),
         }[slot]
 
-        # Emit UTC timestamps with seconds and 'Z'
-        dtstart = dt.strftime("%Y%m%d") + f"T{start_h:02}00" + "00Z"
-        dtend = dt.strftime("%Y%m%d") + f"T{end_h:02}00" + "00Z"
+        # Build timezone-aware start/end datetimes in UTC
+        dtstart_dt = datetime(dt.year, dt.month, dt.day,
+                              start_h, 0, 0, tzinfo=timezone.utc)
+        dtend_dt = datetime(dt.year, dt.month, dt.day,
+                            end_h,   0, 0, tzinfo=timezone.utc)
+        dtstamp = datetime.now(timezone.utc)
+
+        # Format as YYYYMMDDTHHMMSSZ
+        dtstart = dtstart_dt.strftime("%Y%m%dT%H%M%SZ")
+        dtend = dtend_dt.strftime("%Y%m%dT%H%M%SZ")
+        dtstamp = dtstamp.strftime("%Y%m%dT%H%M%SZ")
+
         uid = f"{person_name}-{dt.isoformat()}-{slot}@schedule"
 
         lines += [
             "BEGIN:VEVENT",
             f"UID:{uid}",
-            f"DTSTAMP:{datetime.datetime.now(
-                datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+            f"DTSTAMP:{dtstamp}",
             f"DTSTART:{dtstart}",
             f"DTEND:{dtend}",
             f"SUMMARY:{person_name} shift ({slot})",
@@ -165,7 +174,8 @@ def write_person_ics(person_name, assignments, base_url, output_dir="ics"):
 
     lines.append("END:VCALENDAR")
 
-    with open(path, "w") as f:
+    # Write out the .ics file
+    with open(path, "w", newline="\n") as f:
         f.write("\n".join(lines))
 
     return f"{base_url.rstrip('/')}/{fname}"

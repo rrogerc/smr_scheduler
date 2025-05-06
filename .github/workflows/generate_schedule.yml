@@ -53,7 +53,8 @@ jobs:
             --input availability.xlsx \
             --month ${{ steps.vars.outputs.month }} \
             --year  ${{ steps.vars.outputs.year }} \
-            --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
+            --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
+            --cal-url-base https://meghanuni.github.io/smr_scheduler/ics
 
       # 7) commit & push
       - name: Commit & push schedule

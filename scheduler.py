@@ -279,26 +279,44 @@ def build_calendar_sheet(writer, cal_assign, month, year):
 
 
 def build_person_sheet(writer, person_assign, ics_links):
+    import pandas as pd
+
     wb = writer.book
     ws = wb.add_worksheet('Person Schedule')
     writer.sheets['Person Schedule'] = ws
 
+    # 1) Write Name and Total Shifts via DataFrame
     df = pd.DataFrame([
-        {'Name': name,
-         'Total Shifts': len(assigns),
-         'Calendar URL': ics_links.get(name, '')}
+        {'Name': name, 'Total Shifts': len(assigns)}
         for name, assigns in person_assign.items()
     ])
-
     df.to_excel(writer, sheet_name='Person Schedule', index=False)
 
+    # 2) Style header row
     hdr_fmt = wb.add_format({
-        'bold': True, 'bg_color': '#D9D9D9', 'border': 1, 'font_name': 'Arial'
+        'bold': True, 'bg_color': '#D9D9D9',
+        'border': 1, 'font_name': 'Arial'
     })
-    for col_idx, col in enumerate(df.columns):
-        ws.write(0, col_idx, col, hdr_fmt)
-        width = (12 if col == 'Total Shifts' else 40) if col != 'Name' else 20
-        ws.set_column(col_idx, col_idx, width)
+    for col_idx, col_name in enumerate(df.columns):
+        ws.write(0, col_idx, col_name, hdr_fmt)
+        ws.set_column(col_idx, col_idx, 20)
+
+    # 3) Add Calendar URL column header
+    cal_col = len(df.columns)
+    ws.write(0, cal_col, 'Calendar URL', hdr_fmt)
+    ws.set_column(cal_col, cal_col, 40)
+
+    # 4) Write hyperlinks using HYPERLINK formula
+    link_fmt = wb.add_format({
+        'font_name': 'Arial', 'font_color': 'blue', 'underline': True
+    })
+    for row_idx, name in enumerate(df['Name'], start=1):
+        https_url = ics_links.get(name, '')
+        if not https_url:
+            continue
+        webcal_url = https_url.replace('https://', 'webcal://')
+        formula = f'=HYPERLINK("{webcal_url}", "Subscribe")'
+        ws.write_formula(row_idx, cal_col, formula, link_fmt)
 
 # ─── LOG SHEET ─────────────────────────────────────────────────────────────
 

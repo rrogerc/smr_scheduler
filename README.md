@@ -44,3 +44,5 @@ Allow a way to remake the schedule for the current month.
 Allow swapping of shifts
 
 In the calendar allow special events
+
+Number of desired shifts per week

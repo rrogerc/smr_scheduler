@@ -61,8 +61,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Stage only the generated schedule files
-          git add schedule_*.xlsx docs/ics/*.ics
+          # Stage generated schedule files and calendar files
+          git add schedule_*.xlsx
+          git add docs/ics/*.ics
           # Only commit if there are staged changes
           if git diff --cached --quiet; then
             echo "No changes to commit"

@@ -29,6 +29,8 @@ def load_availability(path):
         first = row.get('First Name', row.get('First Name:', ''))
         last = row.get('Last Name',  row.get('Last Name:',  ''))
         name = f"{first} {last}".strip()
+        # ← new: grab the UCID column
+        ucid = str(row.get('UCID', row.get('UCID:', ''))).strip()
         senior = str(row.get('Are you senior?', '')).strip().lower() == 'yes'
         availability = {}
         for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']:
@@ -39,6 +41,7 @@ def load_availability(path):
             availability[day] = set(slots)
         people.append({
             'name': name,
+            'ucid': ucid,                  # ← store it here
             'senior': senior,
             'availability': availability,
             'assignments': {}
@@ -118,74 +121,74 @@ def assign_slots(people, month, year):
 # ─── ICS GENERATION ────────────────────────────────────────────────────────
 
 
-def write_person_ics(person_name, assignments, base_url, output_dir="docs/ics"):
-    """
-    Writes <script_dir>/docs/ics/First_Last.ics with one VEVENT per shift,
-    returns the public URL: base_url/First_Last.ics
-    """
+def write_person_ics(person_name, ucid, assignments, base_url, month, year,
+                     output_dir="docs/ics"):
     import os
+    import hashlib
     from datetime import datetime, timezone
+    from icalendar import Calendar, Event
 
-    # Find the folder this script lives in
+    # 1) hash the UCID (8 hex chars)
+    h = hashlib.sha256(ucid.encode('utf-8')).hexdigest()[:8]
+    fname = f"{h}.ics"
+
+    # 2) locate & mkdir docs/ics
     script_dir = os.path.dirname(os.path.abspath(__file__))
     ics_dir = os.path.join(script_dir, output_dir)
-
-    # Ensure <repo_root>/docs/ics exists
     os.makedirs(ics_dir, exist_ok=True)
-
-    # Build filename and full path
-    fname = person_name.replace(" ", "_") + ".ics"
     path = os.path.join(ics_dir, fname)
 
-    # VCALENDAR header
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        "PRODID:-//schedule-script//EN",
-    ]
+    # 3) load or initialize
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            cal = Calendar.from_ical(f.read())
+    else:
+        cal = Calendar()
+        cal.add('VERSION',  '2.0')
+        cal.add('CALSCALE', 'GREGORIAN')
+        cal.add('METHOD',   'PUBLISH')
+        cal.add('PRODID',   '-//schedule-script//EN')
 
+    # 4) remove this month’s old events
+    to_remove = []
+    for comp in cal.walk():
+        if comp.name == 'VEVENT':
+            dt = comp.decoded('DTSTART')
+            if dt.year == year and dt.month == month:
+                to_remove.append(comp)
+    for comp in to_remove:
+        cal.remove_component(comp)
+
+    # 5) append new
     for dt, slot in assignments:
-        # map slot to hours
+        if dt.year != year or dt.month != month:
+            continue
         start_h, end_h = {
-            "9AM-11AM":  (9, 11),
-            "11AM-1PM":  (11, 13),
-            "1PM-3PM":   (13, 15),
-            "3PM-5PM":   (15, 17),
+            "9AM-11AM": (9, 11),
+            "11AM-1PM": (11, 13),
+            "1PM-3PM":  (13, 15),
+            "3PM-5PM":  (15, 17),
         }[slot]
 
-        # build UTC datetimes
-        dtstart_dt = datetime(dt.year, dt.month, dt.day,
-                              start_h, 0, 0, tzinfo=timezone.utc)
-        dtend_dt = datetime(dt.year, dt.month, dt.day,
-                            end_h,   0, 0, tzinfo=timezone.utc)
+        dtstart = datetime(dt.year, dt.month, dt.day,
+                           start_h, 0, 0, tzinfo=timezone.utc)
+        dtend = datetime(dt.year, dt.month, dt.day,
+                         end_h,  0, 0, tzinfo=timezone.utc)
         dtstamp = datetime.now(timezone.utc)
 
-        # format as YYYYMMDDTHHMMSSZ
-        dtstart = dtstart_dt.strftime("%Y%m%dT%H%M%SZ")
-        dtend = dtend_dt.strftime("%Y%m%dT%H%M%SZ")
-        dtstamp = dtstamp.strftime("%Y%m%dT%H%M%SZ")
+        ev = Event()
+        ev.add('UID',     f"{h}-{dt.isoformat()}-{slot}@schedule")
+        ev.add('DTSTAMP', dtstamp)
+        ev.add('DTSTART', dtstart)
+        ev.add('DTEND',   dtend)
+        ev.add('SUMMARY', f"{person_name} shift ({slot})")
 
-        uid = f"{person_name}-{dt.isoformat()}-{slot}@schedule"
+        cal.add_component(ev)
 
-        lines += [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{dtstamp}",
-            f"DTSTART:{dtstart}",
-            f"DTEND:{dtend}",
-            f"SUMMARY:{person_name} shift ({slot})",
-            "END:VEVENT",
-        ]
+    # 6) write back
+    with open(path, "wb") as f:
+        f.write(cal.to_ical())
 
-    lines.append("END:VCALENDAR")
-
-    # Write to docs/ics under your repo root
-    with open(path, "w", newline="\n") as f:
-        f.write("\n".join(lines))
-
-    # Return the Pages‐served URL
     return f"{base_url.rstrip('/')}/{fname}"
 
 # ─── CALENDAR SHEET ───────────────────────────────────────────────────────
@@ -386,6 +389,7 @@ def build_log_sheet(writer, cal_assign, warnings):
 
 
 def main():
+    import argparse
     import pandas as pd
 
     p = argparse.ArgumentParser()
@@ -400,34 +404,40 @@ def main():
     )
     args = p.parse_args()
 
-    # 1) assign slots
+    # 1) Load people (with UCID) and assign slots
+    people = load_availability(args.input)
     cal_assign, person_assign, warnings = assign_slots(
-        load_availability(args.input),
-        args.month, args.year
+        people, args.month, args.year
     )
 
-    # 2) write out per-person ICS and collect URLs
+    # 2) Write per-person ICS feeds (hashed by UCID) and collect URLs
     ics_folder = "docs/ics"
     ics_links = {}
-    for name, assigns in person_assign.items():
+    for p in people:
+        name = p['name']
+        ucid = p['ucid']
+        assigns = person_assign.get(name, [])
         ics_links[name] = write_person_ics(
             name,
+            ucid,
             assigns,
             args.cal_url_base,
+            month=args.month,
+            year=args.year,
             output_dir=ics_folder
         )
 
-    # 3) write the Excel
+    # 3) Build and save Excel workbook
     out = args.output or f"schedule_{args.month}_{args.year}.xlsx"
     with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
         build_calendar_sheet(writer, cal_assign, args.month, args.year)
         build_person_sheet(writer, person_assign, ics_links)
         build_log_sheet(writer, cal_assign, warnings)
 
-    # 4) summary output
+    # 4) Summary output
     print(f"Written schedule + logs to {out}")
     print(f".ics files in {ics_folder}, served at {
-          args.cal_url_base}/<Full Name>.ics")
+          args.cal_url_base}/<UCID_HASH>.ics")
 
 
 if __name__ == '__main__':

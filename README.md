@@ -46,3 +46,5 @@ Allow swapping of shifts
 In the calendar allow special events
 
 Number of desired shifts per week
+
+Better security, env variable for sheet pull

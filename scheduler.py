@@ -120,17 +120,22 @@ def assign_slots(people, month, year):
 
 def write_person_ics(person_name, assignments, base_url, output_dir="docs/ics"):
     """
-    Writes <output_dir>/First_Last.ics with one VEVENT per shift,
+    Writes <script_dir>/docs/ics/First_Last.ics with one VEVENT per shift,
     returns the public URL: base_url/First_Last.ics
     """
     import os
     from datetime import datetime, timezone
 
-    # ensure the docs/ics folder exists
-    os.makedirs(output_dir, exist_ok=True)
+    # Find the folder this script lives in
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ics_dir = os.path.join(script_dir, output_dir)
 
+    # Ensure <repo_root>/docs/ics exists
+    os.makedirs(ics_dir, exist_ok=True)
+
+    # Build filename and full path
     fname = person_name.replace(" ", "_") + ".ics"
-    path = os.path.join(output_dir, fname)
+    path = os.path.join(ics_dir, fname)
 
     # VCALENDAR header
     lines = [
@@ -176,10 +181,11 @@ def write_person_ics(person_name, assignments, base_url, output_dir="docs/ics"):
 
     lines.append("END:VCALENDAR")
 
-    # write the file under docs/ics/
+    # Write to docs/ics under your repo root
     with open(path, "w", newline="\n") as f:
         f.write("\n".join(lines))
 
+    # Return the Pages‐served URL
     return f"{base_url.rstrip('/')}/{fname}"
 
 # ─── CALENDAR SHEET ───────────────────────────────────────────────────────

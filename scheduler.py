@@ -128,17 +128,17 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
     from datetime import datetime, timezone
     from icalendar import Calendar, Event
 
-    # 1) hash the UCID (8 hex chars)
+    # 1) hash the UCID
     h = hashlib.sha256(ucid.encode('utf-8')).hexdigest()[:8]
     fname = f"{h}.ics"
 
-    # 2) locate & mkdir docs/ics
+    # 2) ensure docs/ics directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     ics_dir = os.path.join(script_dir, output_dir)
     os.makedirs(ics_dir, exist_ok=True)
     path = os.path.join(ics_dir, fname)
 
-    # 3) load or initialize
+    # 3) load existing or create new VCALENDAR
     if os.path.exists(path):
         with open(path, "rb") as f:
             cal = Calendar.from_ical(f.read())
@@ -149,7 +149,7 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
         cal.add('METHOD',   'PUBLISH')
         cal.add('PRODID',   '-//schedule-script//EN')
 
-    # 4) remove this month’s old events
+    # 4) remove existing events for this month/year
     to_remove = []
     for comp in cal.walk():
         if comp.name == 'VEVENT':
@@ -157,12 +157,14 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
             if dt.year == year and dt.month == month:
                 to_remove.append(comp)
     for comp in to_remove:
-        cal.remove_component(comp)
+        # pull it out of the internal list
+        cal.subcomponents.remove(comp)
 
-    # 5) append new
+    # 5) append new events
     for dt, slot in assignments:
         if dt.year != year or dt.month != month:
             continue
+
         start_h, end_h = {
             "9AM-11AM": (9, 11),
             "11AM-1PM": (11, 13),
@@ -185,7 +187,7 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
 
         cal.add_component(ev)
 
-    # 6) write back
+    # 6) write the merged calendar back out
     with open(path, "wb") as f:
         f.write(cal.to_ical())
 

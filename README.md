@@ -34,7 +34,7 @@ Simplify the spreadsheet creation
 - Upload the created excel sheet on google drive instead of just creating it in the repo?
 - Email it to the president?
 
-- [x] Calendar integration, so people can subscribe on their calendar app to see only their scheduled time slots. Also allows people to check the schedule from their phone.
+~~Calendar integration, so people can subscribe on their calendar app to see only their scheduled time slots. Also allows people to check the schedule from their phone.~~ ✅
 
 Make it clear that the UCID in the form is the important part.
 

@@ -20,28 +20,69 @@ TIME_SLOTS = ["9AM-11AM", "11AM-1PM", "1PM-3PM", "3PM-5PM"]
 
 # ─── LOAD AVAILABILITY ──────────────────────────────────────────────────────
 
+def _normalize_cols(df):
+    """Lowercases, strips, and removes non-alphanum characters from column names."""
+    cols = {}
+    for c in df.columns:
+        norm = "".join(filter(str.isalnum, c.lower()))
+        cols[c] = norm
+    return df.rename(columns=cols)
+
+def _find_col(df, *keywords):
+    """Finds the first column in the DataFrame that contains all keywords."""
+    for col in df.columns:
+        if all(kw in col for kw in keywords):
+            return col
+    return None
 
 def load_availability(path):
-    df = pd.read_excel(path, sheet_name=0)
-    df.columns = df.columns.str.strip()
+    """
+    Loads availability from an Excel file with flexible column name matching.
+    """
+    df_raw = pd.read_excel(path, sheet_name=0)
+    df = _normalize_cols(df_raw)
+
+    # Find columns by keywords
+    first_name_col = _find_col(df, 'first', 'name')
+    last_name_col = _find_col(df, 'last', 'name')
+    ucid_col = _find_col(df, 'ucid')
+    senior_col = _find_col(df, 'senior')
+
+    # Dynamically find availability columns
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+    avail_cols = {day: _find_col(df, day) for day in days}
+
+    # Check for missing columns
+    missing = [k for k, v in {
+        'First Name': first_name_col, 'Last Name': last_name_col,
+        'UCID': ucid_col, 'Senior Status': senior_col,
+        **{d.capitalize(): c for d, c in avail_cols.items()}
+    }.items() if not v]
+
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
     people = []
     for _, row in df.iterrows():
-        first = row.get('First Name', row.get('First Name:', ''))
-        last = row.get('Last Name',  row.get('Last Name:',  ''))
+        first = row[first_name_col] if first_name_col else ''
+        last = row[last_name_col] if last_name_col else ''
         name = f"{first} {last}".strip()
-        # ← new: grab the UCID column
-        ucid = str(row.get('UCID', row.get('UCID:', ''))).strip()
-        senior = str(row.get('Are you senior?', '')).strip().lower() == 'yes'
+
+        ucid = str(row[ucid_col]).strip() if ucid_col else ''
+        senior_raw = str(row[senior_col]).strip().lower() if senior_col else ''
+        senior = senior_raw == 'yes'
+
         availability = {}
-        for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']:
-            raw = row.get(f'When is your weekly availability? [{day}]', '')
+        for day, col_name in avail_cols.items():
+            raw = row[col_name]
             slots = [] if pd.isna(raw) or not raw else [
                 s.strip() for s in str(raw).split(',') if s.strip()
             ]
-            availability[day] = set(slots)
+            availability[day.capitalize()] = set(slots)
+
         people.append({
             'name': name,
-            'ucid': ucid,                  # ← store it here
+            'ucid': ucid,
             'senior': senior,
             'availability': availability,
             'assignments': {}

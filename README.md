@@ -7,7 +7,7 @@ SMR Schedule Form (Responses)
 ```
 from the corresponding form.
 
-Based on this availability, it generates an excel sheet for the next month based on everyones availability. It aims to be as "fair" as possible, meaning that it aims for everyone to have roughly the same amount of shifts.
+Based on this availability, it generates an excel sheet for the next month based on everyone's availability. It aims to be as "fair" as possible, meaning that it aims for everyone to have roughly the same amount of shifts.
 
 Of course, a perfectly "fair" schedule might not be possible given that certain time slots might be more/less filled and senior availability might also fluctuate.
 
@@ -22,6 +22,10 @@ If something happens and the schedule needs to be remade at another time, then r
 Actions > (left toolbar) 📅 Generate Monthly Schedule > (right side) Run workflow > Run Workflow (green button)
 ```
 This will run the program manually to remake the schedule for the next month.
+
+## Changing the Form
+The program will fetch the column titles and search for key words. For example, if the column title is `first name (extra context):` the script would turn the column title into `firstnameextracontext` and then search for the words `first` and `name`, if the title contains it then it will match the column title. This means you can change the form questions as long as you keep the key words. Just don't include other column titles key words (don't write `last name` in the first name column title).
+
 # Roadmap
 Figure out a way to remove people from the form
 - Only include people from an official member spreadsheet?

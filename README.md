@@ -24,7 +24,7 @@ Actions > (left toolbar) 📅 Generate Monthly Schedule > (right side) Run workf
 This will run the program manually to remake the schedule for the next month.
 
 ## Changing the Form
-The program will fetch the column titles and search for key words. For example, if the column title is `first name (extra context):` the script would turn the column title into `firstnameextracontext` and then search for the words `first` and `name`, if the title contains it then it will match the column title. This means you can change the form questions as long as you keep the key words. Just don't include other column titles key words (don't write `last name` in the first name column title).
+The program will fetch the column titles and search for key words. For example, if the column title is `first name (extra context):` the script would turn the column title into `firstnameextracontext` and then search for the words `first` and `name`, if the title contains it then it will match the column title. This means you can change the form questions as long as you keep the key words. Just don't include other column titles key words (don't write `last name` in the first name form question).
 
 # Roadmap
 Figure out a way to remove people from the form

@@ -44,7 +44,7 @@ jobs:
       # 5) pull spreadsheet
       - name: pull spreadsheet
         run: |
-          python sync_sheet.py
+          python sync_sheet.py --sheet-id ${{ secrets.SHEET_ID }}
 
       # 6) generate schedule
       - name: Generate schedule

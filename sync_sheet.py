@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import io
 import sys
+import argparse
 
 
 def fetch_sheet_as_df(sheet_id: str, gid: int = 0) -> pd.DataFrame:
@@ -16,10 +17,16 @@ def fetch_sheet_as_df(sheet_id: str, gid: int = 0) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(resp.content))
 
 
+import argparse
+
 # https://docs.google.com/spreadsheets/d/13awWH0EprYSFEFwALH8BcIi-qB1TFSn6fPgNnlxzESo/edit?gid=1539534942#gid=1539534942
 def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('--sheet-id', required=True, help="Google Sheet ID to pull")
+    args = p.parse_args()
+
     # === CONFIGURE THESE ===
-    SHEET_ID = '13awWH0EprYSFEFwALH8BcIi-qB1TFSn6fPgNnlxzESo'  # from your URL
+    SHEET_ID = args.sheet_id
     GID = 1539534942  # sheet’s gid (0 is the first tab)
     OUTPUT_FILE = 'availability.xlsx'
     UCID_COL = 'UCID:'

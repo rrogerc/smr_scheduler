@@ -14,6 +14,7 @@ import pandas as pd
 import datetime
 import calendar
 import argparse
+import hashlib
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 TIME_SLOTS = ["9AM-11AM", "11AM-1PM", "1PM-3PM", "3PM-5PM"]
@@ -123,19 +124,27 @@ def assign_slots(people, month, year):
             cal_assign.setdefault(dt, {})
 
             for slot in TIME_SLOTS:
+                # This function creates a deterministic, fair tie-breaker value for each person
+                # for this specific time slot. It uses a hash of the person's UCID and the slot details.
+                def tie_breaker_key(person):
+                    hash_input = f"{person['ucid']}-{dt.isoformat()}-{slot}".encode('utf-8')
+                    h = hashlib.sha256(hash_input).hexdigest()
+                    # The primary sorting key is weekly assignments (for fairness).
+                    # The hash is the secondary key to break ties consistently and without bias.
+                    return (person['assignments'][wno], int(h, 16))
+
                 # pick one senior
                 seniors = [
                     p for p in people
                     if p['senior'] and slot in p['availability'][dayname]
                 ]
-                elig = [p for p in seniors if p['assignments']
-                        [wno] < 2] or seniors
+                elig = [p for p in seniors if p['assignments'][wno] < 2] or seniors
                 if not elig:
                     warnings.append(f"No senior for {dt} {slot}")
                     assigned = []
                 else:
-                    sel = min(elig, key=lambda p: (
-                        p['assignments'][wno], p['name']))
+                    # Select the senior with the best key (lowest assignments, then lowest hash)
+                    sel = min(elig, key=tie_breaker_key)
                     assigned = [sel]
 
                 # fill remaining 2
@@ -148,7 +157,9 @@ def assign_slots(people, month, year):
                 if len(epool) < need:
                     warnings.append(
                         f"Only {len(epool)+len(assigned)} for {dt} {slot}")
-                epool.sort(key=lambda p: (p['assignments'][wno], p['name']))
+                
+                # Sort the eligible pool using the same deterministic tie-breaker
+                epool.sort(key=tie_breaker_key)
                 assigned += epool[:need]
 
                 # record

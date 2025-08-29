@@ -56,7 +56,7 @@ jobs:
             --input availability.xlsx \
             --month ${{ steps.vars.outputs.month }} \
             --year  ${{ steps.vars.outputs.year }} \
-            --output schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
+            --output schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
             --cal-url-base https://meghanuni.github.io/smr_scheduler/ics
 
       # 7) commit & push
@@ -65,7 +65,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Stage generated schedule files and calendar files
-          git add schedule_*.xlsx
+          git add schedules/schedule_*.xlsx
           git add docs/ics/*.ics
           # Only commit if there are staged changes
           if git diff --cached --quiet; then
@@ -95,4 +95,4 @@ jobs:
 
             Best,
             The Scheduler Bot
-          attachments: schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
+          attachments: schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx

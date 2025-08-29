@@ -1,3 +1,6 @@
 # Excel temporary files
 ~$*.xlsx
 schedules/~$*.xlsx
+
+# Intermediate availability file
+availability.xlsx

@@ -1,5 +1,8 @@
 # smr_scheduler
 This is the repository for the code to generate the monthly schedule for the Student Medical Response Team at the University of Calgary.
+
+If you have any suggestions, please feel free to send me an email. It's hard anticipating all the features you want as I'm not a club member and I've tried my best to design it well but I'm sure I've missed something.
+
 ## How it Works
 
 ### Overview

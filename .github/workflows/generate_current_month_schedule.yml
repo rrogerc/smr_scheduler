@@ -1,0 +1,90 @@
+name: "📅 Generate Current Month Schedule (Manual)"
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) checkout code with credentials
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      # 2) set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # 3) install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4) compute current month/year
+      - name: Compute current year & month
+        id: vars
+        run: |
+          echo "month=$(date +%m)" >> $GITHUB_OUTPUT
+          echo "year=$(date +%Y)"  >> $GITHUB_OUTPUT
+
+      # 5) pull spreadsheet
+      - name: pull spreadsheet
+        run: |
+          python sync_sheet.py \
+            --sheet-id ${{ secrets.SHEET_ID }} \
+            --month ${{ steps.vars.outputs.month }} \
+            --year ${{ steps.vars.outputs.year }}
+
+      # 6) generate schedule
+      - name: Generate schedule
+        run: |
+          python scheduler.py \
+            --input availability.xlsx \
+            --month ${{ steps.vars.outputs.month }} \
+            --year  ${{ steps.vars.outputs.year }} \
+            --output schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
+            --cal-url-base https://meghanuni.github.io/smr_scheduler/ics
+
+      # 7) commit & push
+      - name: Commit & push schedule
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stage generated schedule files and calendar files
+          git add schedules/schedule_*.xlsx
+          git add docs/ics/*.ics
+          # Only commit if there are staged changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📅 Manual schedule regeneration for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
+            git push
+          fi
+
+      # 8) Email schedule
+      - name: Email schedule
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[Manual Regeneration] SMR Schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: SMR Scheduler Bot <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            Hi,
+
+            Attached is the manually regenerated SMR schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}.
+
+            Best,
+            The Scheduler Bot
+          attachments: schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx

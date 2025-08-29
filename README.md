@@ -43,6 +43,8 @@ Actions > (left toolbar) 📅 Generate Monthly Schedule > (right side) Run workf
 ```
 This will run the program manually to remake the schedule for the next month.
 
+Their is also another action that will create the current month schedule as well that can be ran manually. The action that you see above is what gets ran monthly and will generate the schedule for the next month. But I've also included a way to re-create the schedule for the current month if we need it.
+
 ## Security
 This repository needs to be public in order to do calendar integration, because of this I've hidden the sensitive information (mainly mine to be honest for my email integration) like the Excel Sheet link and keys to setup emailing the schedule. I've also setup a hash for the ICS calendar links to the links for each person are random and have no identifying data.
 
@@ -51,9 +53,6 @@ This repository needs to be public in order to do calendar integration, because 
 A form response indicating which month onward the changes will effect when someone submits a form
 
 Make it clear that the UCID in the form is the important part.
-
-Allow a way to remake the schedule for the current month.
-- Second action?
 
 Allow swapping of shifts
 

@@ -1,9 +1,6 @@
 name: "📅 Generate Term Schedule"
 
 on:
-  schedule:
-    # Run on Aug 25th (for Fall) and Dec 25th (for Winter) at 06:00 UTC
-    - cron: '0 6 25 8,12 *'
   workflow_dispatch:
     inputs:
       term:
@@ -48,31 +45,10 @@ jobs:
       - name: Compute target term & year
         id: vars
         run: |
-          # If inputs are provided, use them
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "term=${{ inputs.term }}" >> $GITHUB_OUTPUT
-            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
-            echo "Using manual input: ${{ inputs.term }} ${{ inputs.year }}"
-          else
-            # Scheduled run logic
-            current_month=$(date +%m)
-            current_year=$(date +%Y)
-            
-            if [[ "$current_month" == "08" ]]; then
-              echo "term=Fall" >> $GITHUB_OUTPUT
-              echo "year=$current_year" >> $GITHUB_OUTPUT
-              echo "Scheduled run: Fall $current_year"
-            elif [[ "$current_month" == "12" ]]; then
-              echo "term=Winter" >> $GITHUB_OUTPUT
-              # Winter term is usually Jan-Apr of the NEXT year
-              next_year=$((current_year + 1))
-              echo "year=$next_year" >> $GITHUB_OUTPUT
-              echo "Scheduled run: Winter $next_year"
-            else
-              echo "Error: Unexpected run month $current_month"
-              exit 1
-            fi
-          fi
+          # Use manual inputs
+          echo "term=${{ inputs.term }}" >> $GITHUB_OUTPUT
+          echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          echo "Using manual input: ${{ inputs.term }} ${{ inputs.year }}"
 
       # 5) pull spreadsheet
       - name: pull spreadsheet

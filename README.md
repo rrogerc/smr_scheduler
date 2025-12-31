@@ -11,9 +11,7 @@ Instead of generating a schedule every month, the program now generates a schedu
 - **Fall Term:** Covers September, October, November, and December.
 - **Winter Term:** Covers January, February, March, and April.
 
-The program runs automatically twice a year:
-1. **August 25th at 12:00am MST:** Generates the Fall schedule.
-2. **December 25th at 12:00am MST:** Generates the Winter schedule.
+The schedule is generated manually by the leadership team using the dashboard (see below) before the start of each term.
 
 Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, meaning that it aims for everyone to have roughly the same amount of shifts over the course of the term.
 

@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Octokit } from 'octokit';
-import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw } from 'lucide-react';
+import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw, Info } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Configuration - Update these if the repo owner/name changes
 const REPO_OWNER = 'rrogerc';
@@ -16,13 +18,18 @@ interface ScheduleFile {
   sha: string;
 }
 
+type Tab = 'schedules' | 'how-it-works';
+
 export default function Home() {
   const [token, setToken] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('schedules');
   const [files, setFiles] = useState<ScheduleFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [readme, setReadme] = useState<string>('');
+  const [loadingReadme, setLoadingReadme] = useState(false);
 
   // Form state
   const [selectedTerm, setSelectedTerm] = useState<string>('Fall');
@@ -72,19 +79,43 @@ export default function Home() {
         
         setFiles(scheduleFiles);
       }
+
+      // Also fetch README
+      fetchReadme(authToken);
+
     } catch (error: any) {
       console.error('Login verification failed:', error);
       if (isAutoLogin) {
-        // If auto-login fails, clear storage and logout
         localStorage.removeItem('smr_scheduler_token');
         setIsAuthenticated(false);
       } else {
-        // Show user friendly error
         setLoginError("Access Denied. Please check that you copied the token correctly and try again.");
       }
     } finally {
       setVerifying(false);
       setLoadingFiles(false);
+    }
+  };
+
+  const fetchReadme = async (authToken: string) => {
+    setLoadingReadme(true);
+    try {
+      const octokit = new Octokit({ auth: authToken });
+      const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: 'README.md',
+      });
+      
+      if ('content' in response.data) {
+        // GitHub returns base64 encoded content
+        const decoded = atob(response.data.content);
+        setReadme(decoded);
+      }
+    } catch (error) {
+      console.error('Error fetching README:', error);
+    } finally {
+      setLoadingReadme(false);
     }
   };
 
@@ -99,13 +130,13 @@ export default function Home() {
     setToken('');
     setIsAuthenticated(false);
     setFiles([]);
+    setReadme('');
   };
 
   const fetchSchedules = async (authToken: string) => {
     setLoadingFiles(true);
     try {
       const octokit = new Octokit({ auth: authToken });
-      // Fetch contents of the 'schedules' directory
       const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
         owner: REPO_OWNER,
         repo: REPO_NAME,
@@ -113,7 +144,6 @@ export default function Home() {
       });
 
       if (Array.isArray(response.data)) {
-        // Filter for Excel files and map to our interface
         const scheduleFiles = response.data
           .filter((file: any) => file.name.endsWith('.xlsx'))
           .map((file: any) => ({
@@ -122,7 +152,7 @@ export default function Home() {
             download_url: file.download_url,
             sha: file.sha,
           }))
-          .sort((a, b) => b.name.localeCompare(a.name)); // Sort desc (newest first usually)
+          .sort((a, b) => b.name.localeCompare(a.name));
         
         setFiles(scheduleFiles);
       }
@@ -143,7 +173,7 @@ export default function Home() {
         owner: REPO_OWNER,
         repo: REPO_NAME,
         workflow_id: WORKFLOW_ID,
-        ref: 'main', // Branch to run on
+        ref: 'main',
         inputs: {
           term: selectedTerm,
           year: selectedYear,
@@ -231,7 +261,23 @@ export default function Home() {
               <Calendar className="h-8 w-8 text-blue-600" />
               <span className="ml-3 text-xl font-bold text-gray-900">SMR Scheduler Dashboard</span>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-4">
+              <nav className="flex space-x-1 rounded-lg bg-gray-100 p-1" aria-label="Tabs">
+                <button
+                  onClick={() => setActiveTab('schedules')}
+                  className={`${activeTab === 'schedules' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'} rounded-md px-3 py-1.5 text-sm font-medium transition-all`}
+                >
+                  <FileSpreadsheet className="mr-1.5 inline-block h-4 w-4" />
+                  Schedules
+                </button>
+                <button
+                  onClick={() => setActiveTab('how-it-works')}
+                  className={`${activeTab === 'how-it-works' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'} rounded-md px-3 py-1.5 text-sm font-medium transition-all`}
+                >
+                  <Info className="mr-1.5 inline-block h-4 w-4" />
+                  How it Works
+                </button>
+              </nav>
               <button
                 onClick={handleLogout}
                 className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
@@ -245,128 +291,162 @@ export default function Home() {
       </nav>
 
       <main className="mx-auto max-w-7xl py-10 px-4 sm:px-6 lg:px-8">
-        {message && (
-          <div className={`mb-6 rounded-md p-4 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-            <div className="flex">
-              <div className="flex-shrink-0">
-                {message.type === 'success' ? <div className="h-5 w-5 rounded-full bg-green-400" /> : <AlertCircle className="h-5 w-5" />}
+        {activeTab === 'schedules' ? (
+          <>
+            {message && (
+              <div className={`mb-6 rounded-md p-4 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    {message.type === 'success' ? <div className="h-5 w-5 rounded-full bg-green-400" /> : <AlertCircle className="h-5 w-5" />}
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium">{message.text}</p>
+                  </div>
+                </div>
               </div>
-              <div className="ml-3">
-                <p className="text-sm font-medium">{message.text}</p>
-              </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-          {/* Generator Section */}
-          <div className="md:col-span-1">
-            <div className="overflow-hidden rounded-lg bg-white shadow">
-              <div className="bg-blue-600 px-4 py-5 sm:px-6">
-                <h3 className="text-lg font-medium leading-6 text-white">Generate Schedule</h3>
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+              {/* Generator Section */}
+              <div className="md:col-span-1">
+                <div className="overflow-hidden rounded-lg bg-white shadow">
+                  <div className="bg-blue-600 px-4 py-5 sm:px-6">
+                    <h3 className="text-lg font-medium leading-6 text-white">Generate Schedule</h3>
+                  </div>
+                  <div className="px-4 py-5 sm:p-6">
+                    <div className="space-y-4">
+                      <div>
+                        <label htmlFor="term" className="block text-sm font-medium leading-6 text-gray-900">Term</label>
+                        <select
+                          id="term"
+                          value={selectedTerm}
+                          onChange={(e) => setSelectedTerm(e.target.value)}
+                          className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                        >
+                          <option value="Fall">Fall</option>
+                          <option value="Winter">Winter</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="year" className="block text-sm font-medium leading-6 text-gray-900">Year</label>
+                        <select
+                          id="year"
+                          value={selectedYear}
+                          onChange={(e) => setSelectedYear(e.target.value)}
+                          className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                        >
+                          {[2024, 2025, 2026, 2027].map((y) => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={handleGenerate}
+                        disabled={generating}
+                        className="flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed"
+                      >
+                        {generating ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <Play className="mr-2 h-5 w-5" />
+                            Run Generator
+                          </>
+                        )}
+                      </button>
+                      <p className="text-xs text-gray-500">
+                        This triggers a GitHub Action. The schedule will appear in the list below after 1-2 minutes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="px-4 py-5 sm:p-6">
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="term" className="block text-sm font-medium leading-6 text-gray-900">Term</label>
-                    <select
-                      id="term"
-                      value={selectedTerm}
-                      onChange={(e) => setSelectedTerm(e.target.value)}
-                      className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+
+              {/* List Section */}
+              <div className="md:col-span-2">
+                <div className="overflow-hidden rounded-lg bg-white shadow">
+                  <div className="flex items-center justify-between border-b border-gray-200 px-4 py-5 sm:px-6">
+                    <h3 className="text-lg font-medium leading-6 text-gray-900">Available Schedules</h3>
+                    <button
+                      onClick={() => fetchSchedules(token)}
+                      className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
                     >
-                      <option value="Fall">Fall</option>
-                      <option value="Winter">Winter</option>
-                    </select>
+                      <RefreshCw className={`h-5 w-5 ${loadingFiles ? 'animate-spin' : ''}`} />
+                    </button>
                   </div>
-                  <div>
-                    <label htmlFor="year" className="block text-sm font-medium leading-6 text-gray-900">Year</label>
-                    <select
-                      id="year"
-                      value={selectedYear}
-                      onChange={(e) => setSelectedYear(e.target.value)}
-                      className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
-                    >
-                      {[2024, 2025, 2026, 2027].map((y) => (
-                        <option key={y} value={y}>{y}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    onClick={handleGenerate}
-                    disabled={generating}
-                    className="flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed"
-                  >
-                    {generating ? (
-                      <>
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Processing...
-                      </>
+                  <ul role="list" className="divide-y divide-gray-200">
+                    {loadingFiles && files.length === 0 ? (
+                      <li className="px-4 py-10 text-center text-gray-500">Loading files...</li>
+                    ) : files.length === 0 ? (
+                      <li className="px-4 py-10 text-center text-gray-500">No schedules found.</li>
                     ) : (
-                      <>
-                        <Play className="mr-2 h-5 w-5" />
-                        Run Generator
-                      </>
+                      files.map((file) => (
+                        <li key={file.sha} className="flex items-center justify-between px-4 py-4 hover:bg-gray-50 sm:px-6">
+                          <div className="flex min-w-0 flex-1 items-center">
+                            <div className="flex-shrink-0">
+                              <FileSpreadsheet className="h-8 w-8 text-green-600" />
+                            </div>
+                            <div className="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
+                              <div>
+                                <p className="truncate text-sm font-medium text-blue-600">{file.name}</p>
+                                <p className="mt-1 flex items-center text-xs text-gray-500">
+                                  <span className="truncate">schedules/{file.name}</span>
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <a
+                              href={file.download_url}
+                              className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                            >
+                              <Download className="mr-2 h-4 w-4 text-gray-500" />
+                              Download
+                            </a>
+                          </div>
+                        </li>
+                      ))
                     )}
-                  </button>
-                  <p className="text-xs text-gray-500">
-                    This triggers a GitHub Action. The schedule will appear in the list below after 1-2 minutes.
-                  </p>
+                  </ul>
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* List Section */}
-          <div className="md:col-span-2">
-            <div className="overflow-hidden rounded-lg bg-white shadow">
-              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-5 sm:px-6">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Available Schedules</h3>
-                <button
-                  onClick={() => fetchSchedules(token)}
-                  className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
-                >
-                  <RefreshCw className={`h-5 w-5 ${loadingFiles ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-              <ul role="list" className="divide-y divide-gray-200">
-                {loadingFiles && files.length === 0 ? (
-                  <li className="px-4 py-10 text-center text-gray-500">Loading files...</li>
-                ) : files.length === 0 ? (
-                  <li className="px-4 py-10 text-center text-gray-500">No schedules found.</li>
-                ) : (
-                  files.map((file) => (
-                    <li key={file.sha} className="flex items-center justify-between px-4 py-4 hover:bg-gray-50 sm:px-6">
-                      <div className="flex min-w-0 flex-1 items-center">
-                        <div className="flex-shrink-0">
-                          <FileSpreadsheet className="h-8 w-8 text-green-600" />
-                        </div>
-                        <div className="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
-                          <div>
-                            <p className="truncate text-sm font-medium text-blue-600">{file.name}</p>
-                            <p className="mt-1 flex items-center text-xs text-gray-500">
-                              <span className="truncate">schedules/{file.name}</span>
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <a
-                          href={file.download_url}
-                          className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                        >
-                          <Download className="mr-2 h-4 w-4 text-gray-500" />
-                          Download
-                        </a>
-                      </div>
-                    </li>
-                  ))
-                )}
-              </ul>
+          </>
+        ) : (
+          <div className="overflow-hidden rounded-lg bg-white shadow">
+            <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
+              <h3 className="text-lg font-medium leading-6 text-gray-900">How it Works</h3>
+            </div>
+            <div className="px-4 py-5 sm:p-6">
+              {loadingReadme ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                </div>
+              ) : (
+                <div className="prose prose-blue max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {readme || "Loading instructions..."}
+                  </ReactMarkdown>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        )}
       </main>
+
+      <style jsx global>{`
+        .prose h1 { font-size: 2.25rem; font-weight: 800; margin-bottom: 2rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; color: #1e40af; }
+        .prose h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+        .prose p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .prose li { margin-bottom: 0.5rem; }
+        .prose strong { font-weight: 700; color: #111827; }
+        .prose a { color: #2563eb; text-decoration: underline; }
+      `}</style>
     </div>
   );
 }

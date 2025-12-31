@@ -447,6 +447,10 @@ export default function Home() {
         .prose strong { font-weight: 700; color: #111827; }
         .prose a { color: #2563eb; text-decoration: underline; }
       `}</style>
+      
+      <footer className="mt-10 py-6 text-center text-sm text-gray-500">
+        <p>SMR Scheduler Dashboard v1.0.1 &copy; {new Date().getFullYear()}</p>
+      </footer>
     </div>
   );
 }

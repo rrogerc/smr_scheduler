@@ -3,7 +3,16 @@ name: "📅 Generate Monthly Schedule"
 on:
   schedule:
     - cron: '0 6 25 * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Month (1-12)'
+        required: false
+        default: ''
+      year:
+        description: 'Year (YYYY)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -30,16 +39,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4) compute next month/year
-      - name: Compute next-month year & month
+      # 4) compute next-month year & month (or use inputs)
+      - name: Compute target year & month
         id: vars
         run: |
-          first_of_month=$(date +%Y-%m-1)
-          next=$(date -d "$first_of_month +32 days" +%Y-%m)
-          year=${next%-*}
-          month=${next#*-}
-          echo "month=$month" >> $GITHUB_OUTPUT
-          echo "year=$year"   >> $GITHUB_OUTPUT
+          # If inputs are provided, use them
+          if [[ -n "${{ inputs.month }}" && -n "${{ inputs.year }}" ]]; then
+            echo "month=${{ inputs.month }}" >> $GITHUB_OUTPUT
+            echo "year=${{ inputs.year }}"   >> $GITHUB_OUTPUT
+            echo "Using manual input: ${{ inputs.month }}/${{ inputs.year }}"
+          else
+            # Otherwise default to next month logic
+            first_of_month=$(date +%Y-%m-1)
+            next=$(date -d "$first_of_month +32 days" +%Y-%m)
+            year=${next%-*}
+            month=${next#*-}
+            echo "month=$month" >> $GITHUB_OUTPUT
+            echo "year=$year"   >> $GITHUB_OUTPUT
+            echo "Using default next month: $month/$year"
+          fi
 
       # 5) pull spreadsheet
       - name: pull spreadsheet

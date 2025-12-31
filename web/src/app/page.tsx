@@ -25,7 +25,7 @@ export default function Home() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   // Form state
-  const [selectedMonth, setSelectedMonth] = useState<string>((new Date().getMonth() + 2).toString()); // Default to next month
+  const [selectedTerm, setSelectedTerm] = useState<string>('Fall');
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
 
   const [verifying, setVerifying] = useState(false);
@@ -145,12 +145,12 @@ export default function Home() {
         workflow_id: WORKFLOW_ID,
         ref: 'main', // Branch to run on
         inputs: {
-          month: selectedMonth,
+          term: selectedTerm,
           year: selectedYear,
         },
       });
 
-      setMessage({ type: 'success', text: `Successfully triggered schedule generation for ${selectedMonth}/${selectedYear}. It may take a few minutes to appear.` });
+      setMessage({ type: 'success', text: `Successfully triggered schedule generation for ${selectedTerm} ${selectedYear}. It may take a few minutes to appear.` });
     } catch (error: any) {
       console.error('Error triggering workflow:', error);
       setMessage({ type: 'error', text: `Failed to trigger generation: ${error.message || 'Unknown error'}` });
@@ -268,16 +268,15 @@ export default function Home() {
               <div className="px-4 py-5 sm:p-6">
                 <div className="space-y-4">
                   <div>
-                    <label htmlFor="month" className="block text-sm font-medium leading-6 text-gray-900">Month</label>
+                    <label htmlFor="term" className="block text-sm font-medium leading-6 text-gray-900">Term</label>
                     <select
-                      id="month"
-                      value={selectedMonth}
-                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      id="term"
+                      value={selectedTerm}
+                      onChange={(e) => setSelectedTerm(e.target.value)}
                       className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
                     >
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                        <option key={m} value={m}>{new Date(0, m - 1).toLocaleString('default', { month: 'long' })}</option>
-                      ))}
+                      <option value="Fall">Fall</option>
+                      <option value="Winter">Winter</option>
                     </select>
                   </div>
                   <div>

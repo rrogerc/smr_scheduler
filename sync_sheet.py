@@ -33,8 +33,8 @@ def find_column_by_keywords(df, *keywords):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--sheet-id', required=True, help="Google Sheet ID to pull")
-    p.add_argument('--month',    type=int, required=True, help="Month of schedule to generate")
-    p.add_argument('--year',     type=int, required=True, help="Year of schedule to generate")
+    p.add_argument('--term',     choices=['Fall', 'Winter'], required=True, help="Term to generate schedule for")
+    p.add_argument('--year',     type=int, required=True, help="Year of the term start")
     args = p.parse_args()
 
     # === CONFIGURATION ===
@@ -58,27 +58,22 @@ def main():
         sys.exit(1)
 
     # 2. Determine the term and define the valid date range for submissions
-    month, year = args.month, args.year
+    term, year = args.term, args.year
     start_date, end_date = None, None
 
-    # Fall Term: For schedules from September to December.
-    # Submissions are valid from August 1st to November 30th.
-    if 9 <= month <= 12:
+    # Fall Term: Submissions from August 1st to November 30th.
+    if term == 'Fall':
         start_date = datetime.date(year, 8, 1)
         end_date = datetime.date(year, 11, 30)
-        print(f"INFO: Filtering for Fall term submissions: {start_date} to {end_date}")
+        print(f"INFO: Filtering for Fall term ({year}) submissions: {start_date} to {end_date}")
 
-    # Winter Term: For schedules from January to April.
-    # Submissions are valid from December 1st (of the previous year) to March 31st.
-    elif 1 <= month <= 4:
+    # Winter Term: Submissions from December 1st (previous year) to March 31st.
+    elif term == 'Winter':
         start_date = datetime.date(year - 1, 12, 1)
         end_date = datetime.date(year, 3, 31)
-        print(f"INFO: Filtering for Winter term submissions: {start_date} to {end_date}")
-    
-    else:
-        print(f"⚠️ WARNING: Schedule month ({month}/{year}) is outside standard terms. No date filtering applied.")
+        print(f"INFO: Filtering for Winter term ({year}) submissions: {start_date} to {end_date}")
 
-    # 3. Convert timestamp column and filter by date range if a term was identified
+    # 3. Convert timestamp column and filter by date range
     # This is done on a copy to avoid SettingWithCopyWarning
     df_filtered = df.copy()
     df_filtered[ts_col] = pd.to_datetime(df[ts_col]).dt.date

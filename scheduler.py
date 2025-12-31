@@ -248,12 +248,15 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
 # ─── CALENDAR SHEET ───────────────────────────────────────────────────────
 
 
-def build_calendar_sheet(writer, cal_assign, month, year):
+def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
     import datetime
     import calendar
     wb = writer.book
-    ws = wb.add_worksheet('Monthly Schedule')
-    writer.sheets['Monthly Schedule'] = ws
+    if sheet_name is None:
+        sheet_name = f"{calendar.month_name[month]} {year}"
+    
+    ws = wb.add_worksheet(sheet_name)
+    writer.sheets[sheet_name] = ws
 
     # -- Formats
     title_fmt = wb.add_format({
@@ -439,16 +442,95 @@ def build_log_sheet(writer, cal_assign, warnings):
         )
     ws.set_column(0, 2, 25)
 
+# ─── ICS GENERATION ────────────────────────────────────────────────────────
+
+def write_person_ics(person_name, ucid, assignments, base_url, months, year, output_dir="docs/ics"):
+    """
+    Writes assignments to an ICS file. 
+    `months` is a list of integers (e.g. [9,10,11,12]) representing the term.
+    """
+    import os
+    import hashlib
+    from datetime import datetime, timezone
+    from icalendar import Calendar, Event
+
+    # 1) hash the UCID
+    h = hashlib.sha256(ucid.encode('utf-8')).hexdigest()[:8]
+    fname = f"{h}.ics"
+
+    # 2) ensure docs/ics directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ics_dir = os.path.join(script_dir, output_dir)
+    os.makedirs(ics_dir, exist_ok=True)
+    path = os.path.join(ics_dir, fname)
+
+    # 3) load existing or create new VCALENDAR
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            cal = Calendar.from_ical(f.read())
+    else:
+        cal = Calendar()
+        cal.add('VERSION',  '2.0')
+        cal.add('CALSCALE', 'GREGORIAN')
+        cal.add('METHOD',   'PUBLISH')
+        cal.add('PRODID',   '-//schedule-script//EN')
+
+    # 4) remove existing events for this term (all months in `months`)
+    to_remove = []
+    for comp in cal.walk():
+        if comp.name == 'VEVENT':
+            dt = comp.decoded('DTSTART')
+            # Check if event is within any of the target months of this year
+            if dt.year == year and dt.month in months:
+                to_remove.append(comp)
+    for comp in to_remove:
+        cal.subcomponents.remove(comp)
+
+    # 5) append new events
+    for dt, slot in assignments:
+        # Check against term just in case, though assignments should match
+        if dt.year != year or dt.month not in months:
+            continue
+
+        start_h, end_h = {
+            "9AM-11AM": (9, 11),
+            "11AM-1PM": (11, 13),
+            "1PM-3PM":  (13, 15),
+            "3PM-5PM":  (15, 17),
+        }[slot]
+
+        dtstart = datetime(dt.year, dt.month, dt.day,
+                           start_h, 0, 0, tzinfo=timezone.utc)
+        dtend = datetime(dt.year, dt.month, dt.day,
+                         end_h,  0, 0, tzinfo=timezone.utc)
+        dtstamp = datetime.now(timezone.utc)
+
+        ev = Event()
+        ev.add('UID',     f"{h}-{dt.isoformat()}-{slot}@schedule")
+        ev.add('DTSTAMP', dtstamp)
+        ev.add('DTSTART', dtstart)
+        ev.add('DTEND',   dtend)
+        ev.add('SUMMARY', f"{person_name} shift ({slot})")
+
+        cal.add_component(ev)
+
+    # 6) write the merged calendar back out
+    with open(path, "wb") as f:
+        f.write(cal.to_ical())
+
+    return f"{base_url.rstrip('/')}/{fname}"
+
 # ─── MAIN ─────────────────────────────────────────────────────────────────
 
 
 def main():
     import argparse
     import pandas as pd
+    import calendar
 
     p = argparse.ArgumentParser()
     p.add_argument('--input',       required=True)
-    p.add_argument('--month',       type=int, required=True)
+    p.add_argument('--term',        choices=['Fall', 'Winter'], required=True, help="Term to generate schedule for")
     p.add_argument('--year',        type=int, required=True)
     p.add_argument('--output',      default=None)
     p.add_argument(
@@ -458,40 +540,84 @@ def main():
     )
     args = p.parse_args()
 
-    # 1) Load people (with UCID) and assign slots
-    people = load_availability(args.input)
-    cal_assign, person_assign, warnings = assign_slots(
-        people, args.month, args.year
-    )
+    # Determine months based on term
+    if args.term == 'Fall':
+        months = [9, 10, 11, 12]
+    else: # Winter
+        months = [1, 2, 3, 4]
 
-    # 2) Write per-person ICS feeds (hashed by UCID) and collect URLs
+    # 1) Load people (with UCID)
+    people = load_availability(args.input)
+    
+    # Aggregated results
+    all_cal_assign = {}
+    all_person_assign = {p['name']: [] for p in people}
+    all_warnings = []
+
+    # 2) Loop through each month
+    # We will use the same 'people' objects so 'assignments' (count) could strictly track globally?
+    # BUT 'assign_slots' resets weekly counts inside: `p['assignments'][wno] = 0`.
+    # So 'assign_slots' is safe to call sequentially.
+    # The 'person_assign' returned is local to that month call, so we must extend our global one.
+    
+    # We need to collect per-month cal_assign to write to separate sheets later
+    # But assign_slots returns a dict[Date] -> ...
+    # So we can just merge them into all_cal_assign for the Log, 
+    # but we also want to keep them somewhat separate or just filter by month when writing sheets.
+    # Filtering by month when writing sheets is easier.
+
+    for m in months:
+        print(f"Generating for {calendar.month_name[m]} {args.year}...")
+        cal_assign, person_assign, warnings = assign_slots(people, m, args.year)
+        
+        # Merge cal_assign
+        all_cal_assign.update(cal_assign)
+        
+        # Merge person_assign
+        for name, assigns in person_assign.items():
+            if name in all_person_assign:
+                all_person_assign[name].extend(assigns)
+        
+        # Merge warnings
+        all_warnings.extend(warnings)
+
+    # 3) Write per-person ICS feeds (hashed by UCID) and collect URLs
     ics_folder = "docs/ics"
     ics_links = {}
     for p in people:
         name = p['name']
         ucid = p['ucid']
-        assigns = person_assign.get(name, [])
+        assigns = all_person_assign.get(name, [])
         ics_links[name] = write_person_ics(
             name,
             ucid,
             assigns,
             args.cal_url_base,
-            month=args.month,
+            months=months,
             year=args.year,
             output_dir=ics_folder
         )
 
-    # 3) Build and save Excel workbook
-    out = args.output or f"schedule_{args.month}_{args.year}.xlsx"
+    # 4) Build and save Excel workbook
+    out = args.output or f"schedule_{args.term.lower()}_{args.year}.xlsx"
     with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
-        build_calendar_sheet(writer, cal_assign, args.month, args.year)
-        build_person_sheet(writer, person_assign, ics_links)
-        build_log_sheet(writer, cal_assign, warnings)
+        # Create a sheet for each month
+        for m in months:
+            # Filter cal_assign for this month
+            month_cal_assign = {
+                dt: slots for dt, slots in all_cal_assign.items() 
+                if dt.month == m
+            }
+            sheet_name = f"{calendar.month_name[m]} {args.year}"
+            build_calendar_sheet(writer, month_cal_assign, m, args.year, sheet_name=sheet_name)
+        
+        # Summary sheets
+        build_person_sheet(writer, all_person_assign, ics_links)
+        build_log_sheet(writer, all_cal_assign, all_warnings)
 
-    # 4) Summary output
-    print(f"Written schedule + logs to {out}")
-    print(f".ics files in {ics_folder}, served at {
-          args.cal_url_base}/<UCID_HASH>.ics")
+    # 5) Summary output
+    print(f"Written {args.term} term schedule + logs to {out}")
+    print(f".ics files in {ics_folder}, served at {args.cal_url_base}/<UCID_HASH>.ics")
 
 
 if __name__ == '__main__':

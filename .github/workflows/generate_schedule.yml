@@ -1,18 +1,23 @@
-name: "📅 Generate Monthly Schedule"
+name: "📅 Generate Term Schedule"
 
 on:
   schedule:
-    - cron: '0 6 25 * *'
+    # Run on Aug 25th (for Fall) and Dec 25th (for Winter) at 06:00 UTC
+    - cron: '0 6 25 8,12 *'
   workflow_dispatch:
     inputs:
-      month:
-        description: 'Month (1-12)'
-        required: false
-        default: ''
+      term:
+        description: 'Term (Fall/Winter)'
+        required: true
+        default: 'Fall'
+        type: choice
+        options:
+        - Fall
+        - Winter
       year:
         description: 'Year (YYYY)'
-        required: false
-        default: ''
+        required: true
+        default: '2025'
 
 permissions:
   contents: write
@@ -39,24 +44,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4) compute next-month year & month (or use inputs)
-      - name: Compute target year & month
+      # 4) compute target term & year
+      - name: Compute target term & year
         id: vars
         run: |
           # If inputs are provided, use them
-          if [[ -n "${{ inputs.month }}" && -n "${{ inputs.year }}" ]]; then
-            echo "month=${{ inputs.month }}" >> $GITHUB_OUTPUT
-            echo "year=${{ inputs.year }}"   >> $GITHUB_OUTPUT
-            echo "Using manual input: ${{ inputs.month }}/${{ inputs.year }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "term=${{ inputs.term }}" >> $GITHUB_OUTPUT
+            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+            echo "Using manual input: ${{ inputs.term }} ${{ inputs.year }}"
           else
-            # Otherwise default to next month logic
-            first_of_month=$(date +%Y-%m-1)
-            next=$(date -d "$first_of_month +32 days" +%Y-%m)
-            year=${next%-*}
-            month=${next#*-}
-            echo "month=$month" >> $GITHUB_OUTPUT
-            echo "year=$year"   >> $GITHUB_OUTPUT
-            echo "Using default next month: $month/$year"
+            # Scheduled run logic
+            current_month=$(date +%m)
+            current_year=$(date +%Y)
+            
+            if [[ "$current_month" == "08" ]]; then
+              echo "term=Fall" >> $GITHUB_OUTPUT
+              echo "year=$current_year" >> $GITHUB_OUTPUT
+              echo "Scheduled run: Fall $current_year"
+            elif [[ "$current_month" == "12" ]]; then
+              echo "term=Winter" >> $GITHUB_OUTPUT
+              # Winter term is usually Jan-Apr of the NEXT year
+              next_year=$((current_year + 1))
+              echo "year=$next_year" >> $GITHUB_OUTPUT
+              echo "Scheduled run: Winter $next_year"
+            else
+              echo "Error: Unexpected run month $current_month"
+              exit 1
+            fi
           fi
 
       # 5) pull spreadsheet
@@ -64,7 +79,7 @@ jobs:
         run: |
           python sync_sheet.py \
             --sheet-id ${{ secrets.SHEET_ID }} \
-            --month ${{ steps.vars.outputs.month }} \
+            --term ${{ steps.vars.outputs.term }} \
             --year ${{ steps.vars.outputs.year }}
 
       # 6) generate schedule
@@ -72,9 +87,9 @@ jobs:
         run: |
           python scheduler.py \
             --input availability.xlsx \
-            --month ${{ steps.vars.outputs.month }} \
+            --term ${{ steps.vars.outputs.term }} \
             --year  ${{ steps.vars.outputs.year }} \
-            --output schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
+            --output schedules/schedule_${{ steps.vars.outputs.term }}_${{ steps.vars.outputs.year }}.xlsx \
             --cal-url-base https://rrogerc.github.io/smr_scheduler/ics
 
       # 7) commit & push
@@ -89,7 +104,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "📅 Monthly schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
+            git commit -m "📅 Term schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}"
             git push
           fi
 
@@ -103,14 +118,14 @@ jobs:
           server_port: 465
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "SMR Schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}"
+          subject: "SMR Schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}"
           to: ${{ secrets.MAIL_TO }}
           from: SMR Scheduler Bot <${{ secrets.MAIL_USERNAME }}>
           body: |
             Hi,
 
-            Attached is the SMR schedule for ${{ steps.vars.outputs.month }}/${{ steps.vars.outputs.year }}.
+            Attached is the SMR schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}.
 
             Best,
             The Scheduler Bot
-          attachments: schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx
+          attachments: schedules/schedule_${{ steps.vars.outputs.term }}_${{ steps.vars.outputs.year }}.xlsx

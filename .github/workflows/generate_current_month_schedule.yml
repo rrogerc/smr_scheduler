@@ -51,7 +51,7 @@ jobs:
             --month ${{ steps.vars.outputs.month }} \
             --year  ${{ steps.vars.outputs.year }} \
             --output schedules/schedule_${{ steps.vars.outputs.month }}_${{ steps.vars.outputs.year }}.xlsx \
-            --cal-url-base https://meghanuni.github.io/smr_scheduler/ics
+            --cal-url-base https://rrogerc.github.io/smr_scheduler/ics
 
       # 7) commit & push
       - name: Commit & push schedule

@@ -5,7 +5,7 @@ import { Octokit } from 'octokit';
 import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle } from 'lucide-react';
 
 // Configuration - Update these if the repo owner/name changes
-const REPO_OWNER = 'meghanuni';
+const REPO_OWNER = 'rrogerc';
 const REPO_NAME = 'smr_scheduler';
 const WORKFLOW_ID = 'generate_schedule.yml'; // The filename of the workflow
 

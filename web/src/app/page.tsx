@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Octokit } from 'octokit';
-import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle } from 'lucide-react';
+import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw } from 'lucide-react';
 
 // Configuration - Update these if the repo owner/name changes
 const REPO_OWNER = 'rrogerc';

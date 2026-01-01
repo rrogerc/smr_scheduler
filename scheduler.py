@@ -498,14 +498,18 @@ def build_log_sheet(writer, cal_assign, warnings):
     ws = wb.add_worksheet('Warnings')
     writer.sheets['Warnings'] = ws
 
+    # Add generation timestamp
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws.write(0, 0, f"Generated On: {now}")
+
     df2 = pd.DataFrame([{'Warning': w} for w in warnings])
-    df2.to_excel(writer, sheet_name='Warnings', index=False)
+    df2.to_excel(writer, sheet_name='Warnings', startrow=2, index=False)
 
     fmt_hdr = wb.add_format({
         'bold': True, 'bg_color': '#D9D9D9', 'border': 1
     })
     # header for warnings
-    ws.write(0, 0, 'Warnings', fmt_hdr)
+    ws.write(2, 0, 'Warnings', fmt_hdr)
     ws.set_column(0, 0, 80)
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────

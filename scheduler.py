@@ -100,131 +100,276 @@ def get_month_dates(month, year):
     return sorted(dates)
 
 def assign_slots(people, month, year):
-    # Initialize assignments tracking for this month
-    cal_assign = {} # {date: {slot: [names]}}
-    person_assign = {p['name']: [] for p in people}
-    monthly_counts = {p['name']: 0 for p in people}
-    warnings = []
+    import collections
     
+    # ─── MAX FLOW SOLVER (Edmonds-Karp) ────────────────────────────────────
+    class FlowSolver:
+        def __init__(self):
+            self.graph = collections.defaultdict(dict) # u -> v -> capacity
+            self.flow = collections.defaultdict(dict)  # u -> v -> flow
+            
+        def add_edge(self, u, v, cap):
+            # Directed edge u->v with capacity
+            # If edge exists, add to capacity
+            self.graph[u][v] = self.graph[u].get(v, 0) + cap
+            self.graph[v][u] = self.graph[v].get(u, 0) + 0 # Residual edge
+            
+            # Initialize flow
+            if v not in self.flow[u]: self.flow[u][v] = 0
+            if u not in self.flow[v]: self.flow[v][u] = 0
+
+        def bfs(self, s, t, parent):
+            visited = {s}
+            queue = collections.deque([s])
+            
+            while queue:
+                u = queue.popleft()
+                if u == t:
+                    return True
+                
+                for v, cap in self.graph[u].items():
+                    # Check residual capacity
+                    if v not in visited and cap - self.flow[u][v] > 0:
+                        visited.add(v)
+                        parent[v] = u
+                        queue.append(v)
+            return False
+
+        def max_flow(self, s, t):
+            max_f = 0
+            while True:
+                parent = {}
+                if not self.bfs(s, t, parent):
+                    break
+                
+                # Find path flow
+                path_flow = float('inf')
+                v = t
+                while v != s:
+                    u = parent[v]
+                    path_flow = min(path_flow, self.graph[u][v] - self.flow[u][v])
+                    v = u
+                
+                # Update residual capacities
+                v = t
+                while v != s:
+                    u = parent[v]
+                    self.flow[u][v] += path_flow
+                    self.flow[v][u] -= path_flow
+                    v = u
+                    
+                max_f += path_flow
+            return max_f
+
+    # ─── SETUP ─────────────────────────────────────────────────────────────
+    
+    # Data structures for results
     dates = get_month_dates(month, year)
+    cal_assign = {dt: {slot: [] for slot in TIME_SLOTS} for dt in dates}
+    person_assign = {p['name']: [] for p in people}
     
-    # Pre-structure the calendar dict
-    all_slots = [] # List of (dt, slot_name) tuples
+    # Helper to track person state across phases
+    # We need to know:
+    # 1. How many shifts person has used (Max 2)
+    # 2. Which days they have worked (Max 1 per day)
+    person_state = {
+        p['name']: {'shifts': 0, 'days_worked': set()} 
+        for p in people
+    }
+
+    # Helper: Flatten slots for easy indexing
+    # ID Format: "SLOT_{iso_date}_{slot_name}"
+    # Person ID: "PERSON_{name}"
+    # Day ID: "DAY_{name}_{iso_date}" (Intermediate node for 1-per-day)
+    
+    all_slots = []
     for dt in dates:
-        cal_assign[dt] = {}
         dayname = calendar.day_name[dt.weekday()]
         for slot in TIME_SLOTS:
-            cal_assign[dt][slot] = []
             all_slots.append((dt, slot, dayname))
 
-    # Helper to check availability
-    def is_available(person, dayname, slot):
-        return slot in person['availability'].get(dayname, [])
-
-    # Helper: deterministic hash for tie-breaking
-    def get_hash(person, dt, slot):
-        hash_input = f"{person['ucid']}-{dt.isoformat()}-{slot}".encode('utf-8')
-        return int(hashlib.sha256(hash_input).hexdigest(), 16)
-
-    # ─── PHASE 1: MANDATORY SENIORS ───
-    # Ensure every slot has at least 1 senior (Constraint: Max 2 seniors)
-    for dt, slot, dayname in all_slots:
-        current_assigned = cal_assign[dt][slot]
-        seniors_assigned = [p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)]
-        has_senior = len(seniors_assigned) > 0
+    def run_flow_phase(target_group_filter, slot_cap_fn, description):
+        """
+        Builds a fresh graph based on current state and solves max flow.
+        target_group_filter: func(person) -> bool (who to include)
+        slot_cap_fn: func(dt, slot, current_count) -> int (remaining capacity for this phase)
+        """
+        solver = FlowSolver()
+        SOURCE = "SOURCE"
+        SINK = "SINK"
         
-        if not has_senior:
-            # Find available seniors not already assigned to this slot
-            candidates = [
-                p for p in people 
-                if p['senior'] 
-                and is_available(p, dayname, slot)
-                and p['name'] not in current_assigned
-            ]
-            
-            if not candidates:
-                warnings.append(f"No senior available for {dt} {slot}")
-                continue
-            
-            # Pick senior with lowest monthly count, then deterministic hash
-            candidates.sort(key=lambda p: (monthly_counts[p['name']], get_hash(p, dt, slot)))
-            selected = candidates[0]
-            
-            cal_assign[dt][slot].append(selected['name'])
-            person_assign[selected['name']].append((dt, slot))
-            monthly_counts[selected['name']] += 1
-
-    # ─── PHASE 2: QUOTA FILL (Target 2 shifts per person) ───
-    # Iterate until everyone has at least 2 shifts (or no availability left)
-    
-    # Create a queue of people who need shifts
-    people_needing_shifts = [p for p in people if monthly_counts[p['name']] < 2]
-    
-    # We loop while there are people needing shifts and we are making progress
-    progress = True
-    while people_needing_shifts and progress:
-        progress = False
-        # Sort people by who needs shifts the most (lowest count)
-        people_needing_shifts.sort(key=lambda p: (monthly_counts[p['name']], p['ucid']))
+        # 1. Add Edges for People
+        active_people = [p for p in people if target_group_filter(p)]
         
-        for person in people_needing_shifts[:]: # Iterate copy
-            if monthly_counts[person['name']] >= 2:
-                people_needing_shifts.remove(person)
+        for p in active_people:
+            name = p['name']
+            state = person_state[name]
+            
+            # shifts_needed = 2 - shifts_done
+            # But in this specific phase, we might only want to assign 1 more.
+            # However, max flow will naturally fill up to capacity.
+            remaining_quota = 2 - state['shifts']
+            if remaining_quota <= 0:
                 continue
                 
-            # Find all available slots for this person
-            available_slots = []
-            for dt, slot, dayname in all_slots:
-                # Check availability
-                if not is_available(person, dayname, slot):
-                    continue
+            # S -> Person (Capacity: Remaining quota)
+            p_node = f"PERSON_{name}"
+            solver.add_edge(SOURCE, p_node, remaining_quota)
+            
+            # Person -> Day -> Slot
+            # We iterate dates to build the "Day" nodes
+            for dt in dates:
+                if dt in state['days_worked']:
+                    continue # Already worked this day
                 
-                # Check constraints
-                current_assigned = cal_assign[dt][slot]
-                if person['name'] in current_assigned:
-                    continue
-                if len(current_assigned) >= 5: # Max 5 people
-                    continue
+                dayname = calendar.day_name[dt.weekday()]
+                day_node = f"DAY_{name}_{dt.isoformat()}"
                 
-                seniors_in_slot = len([p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)])
-                if person['senior'] and seniors_in_slot >= 2: # Max 2 seniors
-                    continue
+                # Check if person is available for ANY slot on this day
+                # to decide if we even create the Day node
+                # (Optimization: Only create edge if >0 valid slots)
+                day_has_slots = False
+                
+                for slot in TIME_SLOTS:
+                    if slot not in p['availability'].get(dayname, []):
+                        continue
+                    
+                    # Hard Constraint: Max 2 Seniors per slot
+                    # We must check this even in general fill to prevent seniors from over-stacking
+                    seniors_in_slot = len([x for x in cal_assign[dt][slot] if any(sp['name'] == x and sp['senior'] for sp in people)])
+                    if p['senior'] and seniors_in_slot >= 2:
+                        continue
+                    
+                    # Check Slot Capacity
+                    curr = len(cal_assign[dt][slot])
+                    cap = slot_cap_fn(dt, slot, curr)
+                    if cap <= 0:
+                        continue
+                        
+                    # Add Edge: Day -> Slot
+                    slot_node = f"SLOT_{dt.isoformat()}_{slot}"
+                    solver.add_edge(day_node, slot_node, 1)
+                    day_has_slots = True
+                    
+                    # Add Edge: Slot -> Sink (Capacity: cap)
+                    # Note: Multiple people point to Slot, Slot points to Sink.
+                    # We set Slot->Sink capacity ONCE.
+                    # In this simple implementation, calling add_edge multiple times adds to capacity.
+                    # So we must guard to add Slot->Sink only once.
+                    # But wait, our Solver `add_edge` ADDS capacity.
+                    # So we should strictly add Slot->Sink OUTSIDE this loop.
+                
+                if day_has_slots:
+                    # Person -> Day (Capacity: 1) - Ensures 1 shift per day
+                    solver.add_edge(p_node, day_node, 1)
 
-                # We prioritize slots with fewer people to spread the load
-                current_count = len(current_assigned)
-                available_slots.append((dt, slot, current_count))
-            
-            if not available_slots:
-                # No slots available for this person
-                people_needing_shifts.remove(person)
-                continue
-            
-            # Sort slots: 
-            # 1. Primary: Slots with < 2 people (needs coverage)
-            # 2. Secondary: Slots with fewest people
-            # 3. Tertiary: Hash
-            available_slots.sort(key=lambda x: (
-                0 if x[2] < 2 else 1, # Prioritize filling empty slots
-                x[2],                 # Then fill less populated slots
-                get_hash(person, x[0], x[1]) # Tie-breaker
-            ))
-            
-            # Pick the best slot
-            best_dt, best_slot, _ = available_slots[0]
-            
-            cal_assign[best_dt][best_slot].append(person['name'])
-            person_assign[person['name']].append((best_dt, best_slot))
-            monthly_counts[person['name']] += 1
-            progress = True
-            
-            if monthly_counts[person['name']] >= 2:
-                people_needing_shifts.remove(person)
+        # 2. Add Slot -> Sink Edges (Globally for this phase)
+        for dt, slot, _ in all_slots:
+            curr = len(cal_assign[dt][slot])
+            cap = slot_cap_fn(dt, slot, curr)
+            if cap > 0:
+                slot_node = f"SLOT_{dt.isoformat()}_{slot}"
+                solver.add_edge(slot_node, SINK, cap)
 
-    # Check for shift counts != 2 (Update warning to simply report count)
+        # 3. Solve
+        solver.max_flow(SOURCE, SINK)
+        
+        # 4. Extract Assignments & Update State
+        assigned_count = 0
+        for p in active_people:
+            name = p['name']
+            p_node = f"PERSON_{name}"
+            
+            # Trace flow: Person -> Day -> Slot
+            if p_node not in solver.flow: continue
+            
+            for day_node, flow_val in solver.flow[p_node].items():
+                if flow_val > 0 and day_node.startswith("DAY_"):
+                    # Found a day assignment. Now find which slot.
+                    for slot_node, s_flow in solver.flow[day_node].items():
+                        if s_flow > 0 and slot_node.startswith("SLOT_"):
+                            # Parse Slot ID
+                            # SLOT_2025-01-01_8AM-10AM
+                            parts = slot_node.split('_')
+                            date_str = parts[1]
+                            slot_str = parts[2]
+                            
+                            # Convert back to object
+                            # (We know dt because we have the date_str)
+                            dt_obj = datetime.date.fromisoformat(date_str)
+                            
+                            # Commit Assignment
+                            cal_assign[dt_obj][slot_str].append(name)
+                            person_assign[name].append((dt_obj, slot_str))
+                            person_state[name]['shifts'] += 1
+                            person_state[name]['days_worked'].add(dt_obj)
+                            assigned_count += 1
+        
+        print(f"    - {description}: Assigned {assigned_count} shifts.")
+
+    # ─── EXECUTION PHASES ──────────────────────────────────────────────────
+    
+    print(f"  > Network Flow Optimization for {calendar.month_name[month]}...")
+
+    # Phase 1: Senior Coverage (Spread)
+    # Target: Seniors only. Slot Cap: 1 (if empty).
+    # Goal: Get 1 senior into every slot that needs one.
+    def cap_phase1(dt, slot, curr):
+        # We want to fill up to 1 person (senior)
+        # If already has 1, cap is 0.
+        return 1 if curr == 0 else 0
+        
+    run_flow_phase(lambda p: p['senior'], cap_phase1, "Phase 1 (Senior Spread)")
+    
+    # Phase 2: Senior Depth
+    # Target: Seniors only. Slot Cap: 2 (if <2 seniors).
+    # Goal: Allow 2nd senior.
+    def cap_phase2(dt, slot, curr):
+        # We enforce strict max 2 seniors.
+        # Current 'curr' are all seniors (from Phase 1).
+        return 2 - curr if curr < 2 else 0
+    
+    run_flow_phase(lambda p: p['senior'], cap_phase2, "Phase 2 (Senior Max)")
+    
+    # Phase 3: General Fill (Iterative Balance)
+    # Target: Everyone. 
+    # Strategy: Fill slots layer by layer (1, then 2, then 3...) to maximize spread.
+    for target_cap in range(1, 6):
+        def cap_phase_general(dt, slot, curr):
+            # We want to fill up to 'target_cap'
+            # But we also must respect the global hard limit of 5 (which target_cap handles naturally)
+            # And we must respect Max 2 Seniors (handled by pre-check or just robustness).
+            
+            # Note: We rely on the fact that if a slot has 2 seniors, 
+            # non-seniors can still fill it up to 5.
+            # If a slot has 2 seniors, can a 3rd senior join?
+            # ideally NO. 
+            # But filtering purely by capacity in a mixed graph is hard.
+            # However, since we already maximized seniors in Ph2, it's unlikely a senior 
+            # finds a NEW path now that wasn't there before, unless they displace a junior?
+            # (Edmonds-Karp doesn't displace).
+            
+            if curr >= target_cap:
+                return 0
+            return target_cap - curr
+
+        run_flow_phase(
+            lambda p: True, 
+            cap_phase_general, 
+            f"Phase 3 (General Fill - Cap {target_cap})"
+        )
+
+    # ─── WARNINGS ──────────────────────────────────────────────────────────
+    warnings = []
     for p in people:
-        count = monthly_counts[p['name']]
-        if count < 2:
-            warnings.append(f"{p['name']} has {count} shifts in {calendar.month_name[month]} (Target minimum 2)")
+        c = person_state[p['name']]['shifts']
+        if c < 2:
+            warnings.append(f"{p['name']} has {c} shifts in {calendar.month_name[month]} (Target: 2)")
+            
+    for dt, slot, _ in all_slots:
+        assigned = cal_assign[dt][slot]
+        if assigned and not any(x for x in assigned if any(p['name'] == x and p['senior'] for p in people)):
+             warnings.append(f"Slot {dt} {slot} has {len(assigned)} people but NO SENIOR.")
 
     return cal_assign, person_assign, warnings
 

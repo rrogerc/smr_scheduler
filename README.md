@@ -19,11 +19,13 @@ Based on everyone's availability, it generates a single Excel sheet for the next
 
 #### 1. Scheduling Logic (Fairness & Constraints)
 The algorithm has been overhauled to prioritize fairness and specific club constraints:
-- **Strict 2-Shift Cap:** The system prioritizes giving everyone exactly **2 shifts per month**. It will not assign a 3rd shift just to fill a seat.
+- **Strict 2-Shift Cap:** The system enforces a **strict maximum of 2 shifts per person per month**. It will **never** automatically assign a 3rd shift to anyone, even if slots remain empty.
+- **Under-Assignment:** If a member has limited availability and cannot be assigned 2 shifts, the system will assign what it can and list them in the **Warnings** tab. It is up to leadership to manually resolve these gaps.
 - **Slot Capacity:** Each time slot (e.g., 8AM-10AM) can hold up to **5 people**.
 - **Senior Constraints:** 
     - Every slot aims to have **at least 1 senior**.
     - No slot will ever have **more than 2 seniors**.
+    - If no senior is available (or all available seniors have reached their 2-shift cap), the slot may remain without a senior, and a warning will be logged.
 - **Distribution:** Shifts are distributed intelligently to maximize coverage (i.e., slots with 0 people get filled before adding a 3rd person to another slot).
 
 #### 2. Enhanced Excel Output

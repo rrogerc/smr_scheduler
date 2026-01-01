@@ -724,23 +724,11 @@ def main():
     ics_folder = "docs/ics"
     ics_links = {}
     
-    # Prepare roster data for JSON export
-    roster_data = []
-    
     for p in people:
         name = p['name']
         ucid = p['ucid']
         assigns = all_person_assign.get(name, [])
         shift_count = len(assigns)
-        
-        # Add to roster data
-        # Calculate ucid_hash same way as write_person_ics does
-        h = hashlib.sha256(ucid.encode('utf-8')).hexdigest()[:8]
-        roster_data.append({
-            "name": name,
-            "shifts": shift_count,
-            "ucid_hash": h
-        })
         
         ics_links[name] = write_person_ics(
             name,
@@ -751,16 +739,6 @@ def main():
             year=args.year,
             output_dir=ics_folder
         )
-
-    # Write roster.json
-    import json
-    roster_path = f"docs/rosters/roster_{args.term}_{args.year}.json"
-    os.makedirs(os.path.dirname(roster_path), exist_ok=True)
-    with open(roster_path, "w") as f:
-        # Sort by name for nicer display
-        roster_data.sort(key=lambda x: x['name'])
-        json.dump(roster_data, f, indent=2)
-    print(f"Written roster summary to {roster_path}")
 
     # 4) Build and save Excel workbook
     out = args.output or f"schedule_{args.term.lower()}_{args.year}.xlsx"

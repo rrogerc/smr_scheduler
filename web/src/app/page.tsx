@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Octokit } from 'octokit';
-import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw, Info, Users } from 'lucide-react';
+import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw, Info, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm';
 const REPO_OWNER = 'rrogerc';
 const REPO_NAME = 'smr_scheduler';
 const WORKFLOW_ID = 'generate_term_schedule.yml'; // The filename of the workflow
+const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/'; // TODO: Add your Google Sheet URL here
 
 interface ScheduleFile {
   name: string;
@@ -19,12 +20,7 @@ interface ScheduleFile {
   lastUpdated?: string; // Add timestamp field
 }
 
-interface RosterEntry {
-  name: string;
-  shifts?: number;
-}
-
-type Tab = 'schedules' | 'roster' | 'how-it-works';
+type Tab = 'schedules' | 'how-it-works';
 
 export default function Home() {
   const [token, setToken] = useState<string>('');
@@ -32,8 +28,6 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('schedules');
   const [files, setFiles] = useState<ScheduleFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
-  const [loadingRoster, setLoadingRoster] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [readme, setReadme] = useState<string>('');
@@ -62,11 +56,6 @@ export default function Home() {
   // Form state
   const [selectedTerm, setSelectedTerm] = useState<string>(initial.term);
   const [selectedYear, setSelectedYear] = useState<string>(initial.year);
-
-  // Roster state
-  const [rosterTerm, setRosterTerm] = useState<string>(initial.term);
-  const [rosterYear, setRosterYear] = useState<string>(initial.year);
-  const [refreshingRoster, setRefreshingRoster] = useState(false);
 
   const [verifying, setVerifying] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -144,10 +133,8 @@ export default function Home() {
         setFiles(scheduleFiles);
       }
 
-      // Also fetch README and Roster (default)
+      // Also fetch README
       fetchReadme(authToken);
-      const initial = getInitialTerm();
-      fetchRoster(authToken, initial.term, initial.year);
 
     } catch (error: any) {
       console.error('Login verification failed:', error);
@@ -185,68 +172,6 @@ export default function Home() {
     }
   };
 
-  const fetchRoster = async (authToken: string, term: string, year: string) => {
-    setLoadingRoster(true);
-    setRoster([]); // Clear old roster while loading
-    try {
-      const octokit = new Octokit({ auth: authToken });
-      const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        path: `docs/rosters/roster_${term}_${year}.json`,
-      });
-      
-      if ('content' in response.data) {
-        const decoded = atob(response.data.content);
-        const data = JSON.parse(decoded);
-        if (Array.isArray(data)) {
-          setRoster(data);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching Roster:', error);
-      // It's okay if roster.json doesn't exist yet
-    } finally {
-      setLoadingRoster(false);
-    }
-  };
-
-  const handleRefreshRoster = async () => {
-    setRefreshingRoster(true);
-    setMessage(null);
-    try {
-      const octokit = new Octokit({ auth: token });
-      const response = await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
-        owner: REPO_OWNER,
-        repo: REPO_NAME,
-        workflow_id: 'refresh_roster.yml',
-        ref: 'main',
-        inputs: {
-          term: rosterTerm,
-          year: rosterYear,
-        },
-      });
-
-      if (response.status === 204) {
-        const msg = `Roster refresh triggered for ${rosterTerm} ${rosterYear}. It may take a minute.`;
-        setMessage({ type: 'success', text: msg });
-        alert(msg);
-      } else {
-        throw new Error(`Unexpected status: ${response.status}`);
-      }
-    } catch (error: any) {
-      console.error('Error triggering roster refresh:', error);
-      let errMsg = error.message || 'Unknown error';
-      if (error.status === 403 || error.status === 404) {
-        errMsg = "Failed to trigger. Please ensure your Token has the 'workflow' scope enabled.";
-      }
-      setMessage({ type: 'error', text: errMsg });
-      alert(errMsg);
-    } finally {
-      setRefreshingRoster(false);
-    }
-  };
-
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -259,7 +184,6 @@ export default function Home() {
     setIsAuthenticated(false);
     setFiles([]);
     setReadme('');
-    setRoster([]);
   };
 
   const fetchSchedules = async (authToken: string) => {
@@ -424,13 +348,6 @@ export default function Home() {
                   Schedules
                 </button>
                 <button
-                  onClick={() => setActiveTab('roster')}
-                  className={`${activeTab === 'roster' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'} rounded-md px-3 py-1.5 text-sm font-medium transition-all`}
-                >
-                  <Users className="mr-1.5 inline-block h-4 w-4" />
-                  Roster
-                </button>
-                <button
                   onClick={() => setActiveTab('how-it-works')}
                   className={`${activeTab === 'how-it-works' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'} rounded-md px-3 py-1.5 text-sm font-medium transition-all`}
                 >
@@ -501,7 +418,28 @@ export default function Home() {
 
               <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
                 {/* Generator Section */}
-                <div className="md:col-span-1">
+                <div className="md:col-span-1 space-y-6">
+                  {/* Master Spreadsheet Link */}
+                  <div className="overflow-hidden rounded-lg bg-white shadow">
+                    <div className="bg-gray-800 px-4 py-3 sm:px-6">
+                      <h3 className="text-sm font-medium leading-6 text-white">Source Data</h3>
+                    </div>
+                    <div className="px-4 py-5 sm:p-6">
+                       <a 
+                         href={SPREADSHEET_URL} 
+                         target="_blank" 
+                         rel="noopener noreferrer"
+                         className="flex w-full items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500"
+                       >
+                         <ExternalLink className="mr-2 h-4 w-4" />
+                         Open Master Sheet
+                       </a>
+                       <p className="mt-2 text-xs text-gray-500">
+                         View the raw availability data in Google Sheets.
+                       </p>
+                    </div>
+                  </div>
+
                   <div className="overflow-hidden rounded-lg bg-white shadow">
                     <div className="bg-blue-600 px-4 py-5 sm:px-6">
                       <h3 className="text-lg font-medium leading-6 text-white">Actions</h3>
@@ -607,86 +545,6 @@ export default function Home() {
               </div>
             </div>
           </>
-        ) : activeTab === 'roster' ? (
-          <div className="overflow-hidden rounded-lg bg-white shadow">
-            <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <h3 className="text-lg font-medium leading-6 text-gray-900">Roster (Raw Availability)</h3>
-                <div className="flex items-center space-x-2">
-                  <select
-                    value={rosterTerm}
-                    onChange={(e) => {
-                      setRosterTerm(e.target.value);
-                      fetchRoster(token, e.target.value, rosterYear);
-                    }}
-                    className="block rounded-md border-0 py-1.5 pl-3 pr-8 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  >
-                    <option value="Fall">Fall</option>
-                    <option value="Winter">Winter</option>
-                  </select>
-                  <select
-                    value={rosterYear}
-                    onChange={(e) => {
-                      setRosterYear(e.target.value);
-                      fetchRoster(token, rosterTerm, e.target.value);
-                    }}
-                    className="block rounded-md border-0 py-1.5 pl-3 pr-8 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  >
-                    {[2024, 2025, 2026, 2027].map((y) => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleRefreshRoster}
-                    disabled={refreshingRoster}
-                    className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`mr-2 h-4 w-4 text-gray-500 ${refreshingRoster ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="px-4 py-5 sm:p-6">
-              {loadingRoster && roster.length === 0 ? (
-                 <div className="flex justify-center py-10">
-                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                 </div>
-              ) : roster.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No roster data found for {rosterTerm} {rosterYear}.</p>
-                  <p className="text-sm mt-1">Click "Refresh" to pull the latest data from the spreadsheet.</p>
-                </div>
-              ) : (
-                <div className="flow-root">
-                  <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-                    <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
-                      <table className="min-w-full divide-y divide-gray-300">
-                        <thead>
-                          <tr>
-                            <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">Name</th>
-                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {roster.map((person) => (
-                            <tr key={person.name}>
-                              <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">{person.name}</td>
-                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                                <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                                  Submitted
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
         ) : (
           <div className="overflow-hidden rounded-lg bg-white shadow">
             <div className="border-b border-gray-200 px-4 py-5 sm:px-6">

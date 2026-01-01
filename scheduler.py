@@ -12,7 +12,7 @@ import hashlib
 import random
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
-TIME_SLOTS = ["9AM-11AM", "11AM-1PM", "1PM-3PM", "3PM-5PM"]
+TIME_SLOTS = ["8AM-10AM", "10AM-12PM", "12PM-2PM", "2PM-4PM", "4PM-6PM"]
 
 # ─── LOAD AVAILABILITY ──────────────────────────────────────────────────────
 
@@ -299,10 +299,11 @@ def write_person_ics(person_name, ucid, assignments, base_url, months, year, out
             continue
 
         start_h, end_h = {
-            "9AM-11AM": (9, 11),
-            "11AM-1PM": (11, 13),
-            "1PM-3PM":  (13, 15),
-            "3PM-5PM":  (15, 17),
+            "8AM-10AM":  (8, 10),
+            "10AM-12PM": (10, 12),
+            "12PM-2PM":  (12, 14),
+            "2PM-4PM":   (14, 16),
+            "4PM-6PM":   (16, 18),
         }[slot]
 
         dtstart = datetime(dt.year, dt.month, dt.day,

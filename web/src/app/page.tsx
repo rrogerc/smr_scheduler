@@ -445,121 +445,143 @@ export default function Home() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-              {/* Generator Section */}
-              <div className="md:col-span-1">
-                <div className="overflow-hidden rounded-lg bg-white shadow">
-                  <div className="bg-blue-600 px-4 py-5 sm:px-6">
-                    <h3 className="text-lg font-medium leading-6 text-white">Generate Schedule</h3>
+            <div className="space-y-6">
+              {/* Global Controls */}
+              <div className="rounded-lg bg-white p-6 shadow">
+                <h3 className="mb-4 text-lg font-medium text-gray-900">Select Term & Year</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="term" className="block text-sm font-medium leading-6 text-gray-900">Term</label>
+                    <select
+                      id="term"
+                      value={selectedTerm}
+                      onChange={(e) => setSelectedTerm(e.target.value)}
+                      className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                    >
+                      <option value="Fall">Fall</option>
+                      <option value="Winter">Winter</option>
+                    </select>
                   </div>
-                  <div className="px-4 py-5 sm:p-6">
-                    <div className="space-y-4">
-                      <div>
-                        <label htmlFor="term" className="block text-sm font-medium leading-6 text-gray-900">Term</label>
-                        <select
-                          id="term"
-                          value={selectedTerm}
-                          onChange={(e) => setSelectedTerm(e.target.value)}
-                          className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
-                        >
-                          <option value="Fall">Fall</option>
-                          <option value="Winter">Winter</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label htmlFor="year" className="block text-sm font-medium leading-6 text-gray-900">Year</label>
-                        <select
-                          id="year"
-                          value={selectedYear}
-                          onChange={(e) => setSelectedYear(e.target.value)}
-                          className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
-                        >
-                          {[2024, 2025, 2026, 2027].map((y) => (
-                            <option key={y} value={y}>{y}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        onClick={handleGenerate}
-                        disabled={generating}
-                        className="flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed"
-                      >
-                        {generating ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <Play className="mr-2 h-5 w-5" />
-                            Run Generator
-                          </>
-                        )}
-                      </button>
-                      <p className="text-xs text-gray-500">
-                        This triggers a GitHub Action. The schedule will appear in the list below after 1-2 minutes.
-                      </p>
-                    </div>
+                  <div>
+                    <label htmlFor="year" className="block text-sm font-medium leading-6 text-gray-900">Year</label>
+                    <select
+                      id="year"
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(e.target.value)}
+                      className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                    >
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
 
-              {/* List Section */}
-              <div className="md:col-span-2">
-                <div className="overflow-hidden rounded-lg bg-white shadow">
-                  <div className="flex items-center justify-between border-b border-gray-200 px-4 py-5 sm:px-6">
-                    <h3 className="text-lg font-medium leading-6 text-gray-900">Available Schedules</h3>
-                    <button
-                      onClick={() => fetchSchedules(token)}
-                      className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
-                    >
-                      <RefreshCw className={`h-5 w-5 ${loadingFiles ? 'animate-spin' : ''}`} />
-                    </button>
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+                {/* Generator Section */}
+                <div className="md:col-span-1">
+                  <div className="overflow-hidden rounded-lg bg-white shadow">
+                    <div className="bg-blue-600 px-4 py-5 sm:px-6">
+                      <h3 className="text-lg font-medium leading-6 text-white">Actions</h3>
+                    </div>
+                    <div className="px-4 py-5 sm:p-6">
+                      <div className="space-y-4">
+                        <button
+                          onClick={handleGenerate}
+                          disabled={generating}
+                          className="flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed"
+                        >
+                          {generating ? (
+                            <>
+                              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <Play className="mr-2 h-5 w-5" />
+                              Generate New Version
+                            </>
+                          )}
+                        </button>
+                        <p className="text-xs text-gray-500">
+                          Creates a new version for <strong>{selectedTerm} {selectedYear}</strong>. Previous versions are kept safe.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <ul role="list" className="divide-y divide-gray-200">
-                    {loadingFiles && files.length === 0 ? (
-                      <li className="px-4 py-10 text-center text-gray-500">Loading files...</li>
-                    ) : files.length === 0 ? (
-                      <li className="px-4 py-10 text-center text-gray-500">No schedules found.</li>
-                    ) : (
-                      files.map((file) => (
-                        <li key={file.sha} className="flex items-center justify-between px-4 py-4 hover:bg-gray-50 sm:px-6">
-                          <div className="flex min-w-0 flex-1 items-center">
-                            <div className="flex-shrink-0">
-                              <FileSpreadsheet className="h-8 w-8 text-green-600" />
-                            </div>
-                            <div className="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
-                              <div>
-                                <p className="truncate text-sm font-medium text-blue-600">{file.name}</p>
-                                <p className="mt-1 flex items-center text-xs text-gray-500">
-                                  <span className="truncate">schedules/{file.name}</span>
-                                </p>
-                              </div>
-                              <div className="hidden md:block">
-                                <p className="text-xs text-gray-400">
-                                  Last updated:
-                                </p>
-                                <p className="text-xs text-gray-600">
-                                  {file.lastUpdated 
-                                    ? new Date(file.lastUpdated).toLocaleString() 
-                                    : 'Unknown'}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          <div>
-                            <a
-                              href={file.download_url}
-                              className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                            >
-                              <Download className="mr-2 h-4 w-4 text-gray-500" />
-                              Download
-                            </a>
-                          </div>
+                </div>
+
+                {/* List Section */}
+                <div className="md:col-span-2">
+                  <div className="overflow-hidden rounded-lg bg-white shadow">
+                    <div className="flex items-center justify-between border-b border-gray-200 px-4 py-5 sm:px-6">
+                      <h3 className="text-lg font-medium leading-6 text-gray-900">
+                        Versions for {selectedTerm} {selectedYear}
+                      </h3>
+                      <button
+                        onClick={() => fetchSchedules(token)}
+                        className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
+                      >
+                        <RefreshCw className={`h-5 w-5 ${loadingFiles ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                    <ul role="list" className="divide-y divide-gray-200">
+                      {loadingFiles && files.length === 0 ? (
+                        <li className="px-4 py-10 text-center text-gray-500">Loading files...</li>
+                      ) : files.filter(f => f.name.includes(`${selectedTerm}_${selectedYear}`)).length === 0 ? (
+                        <li className="px-4 py-10 text-center text-gray-500">
+                          No schedules found for {selectedTerm} {selectedYear}.
                         </li>
-                      ))
-                    )}
-                  </ul>
+                      ) : (
+                        files
+                          .filter(f => f.name.includes(`${selectedTerm}_${selectedYear}`))
+                          .map((file) => {
+                             // Parse timestamp from filename: schedule_Fall_2025_2025-01-01-12-00.xlsx
+                             // Split by underscores, take the last part, remove .xlsx
+                             const parts = file.name.split('_');
+                             let displayDate = "Unknown Date";
+                             if (parts.length >= 4) {
+                               const datePart = parts.slice(3).join('_').replace('.xlsx', '');
+                               // Try to make it readable (YYYY-MM-DD-HH-MM)
+                               const dp = datePart.split('-');
+                               if (dp.length >= 5) {
+                                  displayDate = `${dp[0]}-${dp[1]}-${dp[2]} at ${dp[3]}:${dp[4]}`;
+                               } else {
+                                  displayDate = datePart;
+                               }
+                             }
+                             
+                             return (
+                              <li key={file.sha} className="flex items-center justify-between px-4 py-4 hover:bg-gray-50 sm:px-6">
+                                <div className="flex min-w-0 flex-1 items-center">
+                                  <div className="flex-shrink-0">
+                                    <FileSpreadsheet className="h-8 w-8 text-green-600" />
+                                  </div>
+                                  <div className="min-w-0 flex-1 px-4">
+                                    <p className="truncate text-sm font-medium text-blue-600">
+                                      Version: {displayDate}
+                                    </p>
+                                    <p className="mt-1 truncate text-xs text-gray-500">
+                                      {file.name}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div>
+                                  <a
+                                    href={file.download_url}
+                                    className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                  >
+                                    <Download className="mr-2 h-4 w-4 text-gray-500" />
+                                    Download
+                                  </a>
+                                </div>
+                              </li>
+                            );
+                          })
+                      )}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>

@@ -48,6 +48,8 @@ jobs:
           # Use manual inputs
           echo "term=${{ inputs.term }}" >> $GITHUB_OUTPUT
           echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          # Generate timestamp for unique filename
+          echo "timestamp=$(date +'%Y-%m-%d-%H-%M')" >> $GITHUB_OUTPUT
           echo "Using manual input: ${{ inputs.term }} ${{ inputs.year }}"
 
       # 5) pull spreadsheet
@@ -65,7 +67,7 @@ jobs:
             --input availability.xlsx \
             --term ${{ steps.vars.outputs.term }} \
             --year  ${{ steps.vars.outputs.year }} \
-            --output schedules/schedule_${{ steps.vars.outputs.term }}_${{ steps.vars.outputs.year }}.xlsx \
+            --output schedules/schedule_${{ steps.vars.outputs.term }}_${{ steps.vars.outputs.year }}_${{ steps.vars.outputs.timestamp }}.xlsx \
             --cal-url-base https://rrogerc.github.io/smr_scheduler/ics
 
       # 7) commit & push

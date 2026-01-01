@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Octokit } from 'octokit';
-import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw, Info } from 'lucide-react';
+import { Calendar, FileSpreadsheet, LogOut, Play, Loader2, Key, Download, AlertCircle, RefreshCw, Info, Users } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -18,7 +18,12 @@ interface ScheduleFile {
   sha: string;
 }
 
-type Tab = 'schedules' | 'how-it-works';
+interface RosterEntry {
+  name: string;
+  shifts: number;
+}
+
+type Tab = 'schedules' | 'roster' | 'how-it-works';
 
 export default function Home() {
   const [token, setToken] = useState<string>('');
@@ -26,6 +31,8 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('schedules');
   const [files, setFiles] = useState<ScheduleFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [loadingRoster, setLoadingRoster] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [readme, setReadme] = useState<string>('');
@@ -80,8 +87,9 @@ export default function Home() {
         setFiles(scheduleFiles);
       }
 
-      // Also fetch README
+      // Also fetch README and Roster
       fetchReadme(authToken);
+      fetchRoster(authToken);
 
     } catch (error: any) {
       console.error('Login verification failed:', error);
@@ -119,6 +127,31 @@ export default function Home() {
     }
   };
 
+  const fetchRoster = async (authToken: string) => {
+    setLoadingRoster(true);
+    try {
+      const octokit = new Octokit({ auth: authToken });
+      const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: 'docs/roster.json',
+      });
+      
+      if ('content' in response.data) {
+        const decoded = atob(response.data.content);
+        const data = JSON.parse(decoded);
+        if (Array.isArray(data)) {
+          setRoster(data);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching Roster:', error);
+      // It's okay if roster.json doesn't exist yet
+    } finally {
+      setLoadingRoster(false);
+    }
+  };
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -131,6 +164,7 @@ export default function Home() {
     setIsAuthenticated(false);
     setFiles([]);
     setReadme('');
+    setRoster([]);
   };
 
   const fetchSchedules = async (authToken: string) => {
@@ -269,6 +303,13 @@ export default function Home() {
                 >
                   <FileSpreadsheet className="mr-1.5 inline-block h-4 w-4" />
                   Schedules
+                </button>
+                <button
+                  onClick={() => setActiveTab('roster')}
+                  className={`${activeTab === 'roster' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'} rounded-md px-3 py-1.5 text-sm font-medium transition-all`}
+                >
+                  <Users className="mr-1.5 inline-block h-4 w-4" />
+                  Roster
                 </button>
                 <button
                   onClick={() => setActiveTab('how-it-works')}
@@ -415,6 +456,53 @@ export default function Home() {
               </div>
             </div>
           </>
+        ) : activeTab === 'roster' ? (
+          <div className="overflow-hidden rounded-lg bg-white shadow">
+            <div className="border-b border-gray-200 px-4 py-5 sm:px-6 flex justify-between items-center">
+              <h3 className="text-lg font-medium leading-6 text-gray-900">Roster (From Latest Schedule)</h3>
+              <button
+                onClick={() => fetchRoster(token)}
+                className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
+              >
+                <RefreshCw className={`h-5 w-5 ${loadingRoster ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            <div className="px-4 py-5 sm:p-6">
+              {loadingRoster && roster.length === 0 ? (
+                 <div className="flex justify-center py-10">
+                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                 </div>
+              ) : roster.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No roster data available.</p>
+                  <p className="text-sm mt-1">Generate a schedule to see the roster here.</p>
+                </div>
+              ) : (
+                <div className="flow-root">
+                  <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+                    <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
+                      <table className="min-w-full divide-y divide-gray-300">
+                        <thead>
+                          <tr>
+                            <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">Name</th>
+                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Shifts Assigned</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {roster.map((person) => (
+                            <tr key={person.name}>
+                              <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">{person.name}</td>
+                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{person.shifts}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="overflow-hidden rounded-lg bg-white shadow">
             <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
@@ -447,10 +535,6 @@ export default function Home() {
         .prose strong { font-weight: 700; color: #111827; }
         .prose a { color: #2563eb; text-decoration: underline; }
       `}</style>
-      
-      <footer className="mt-10 py-6 text-center text-sm text-gray-500">
-        <p>SMR Scheduler Dashboard v1.0.1 &copy; {new Date().getFullYear()}</p>
-      </footer>
     </div>
   );
 }

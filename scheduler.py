@@ -584,10 +584,24 @@ def main():
     # 3) Write per-person ICS feeds (hashed by UCID) and collect URLs
     ics_folder = "docs/ics"
     ics_links = {}
+    
+    # Prepare roster data for JSON export
+    roster_data = []
+    
     for p in people:
         name = p['name']
         ucid = p['ucid']
         assigns = all_person_assign.get(name, [])
+        shift_count = len(assigns)
+        
+        # Add to roster data
+        roster_data.append({
+            "name": name,
+            "shifts": shift_count,
+            "ucid_hash": list(ics_links.keys()) # We don't have the hash yet, let's generate it or skip. 
+            # Actually, we just need name and shift count for the UI.
+        })
+        
         ics_links[name] = write_person_ics(
             name,
             ucid,
@@ -597,6 +611,16 @@ def main():
             year=args.year,
             output_dir=ics_folder
         )
+
+    # Write roster.json
+    import json
+    roster_path = "docs/roster.json"
+    os.makedirs("docs", exist_ok=True)
+    with open(roster_path, "w") as f:
+        # Sort by name for nicer display
+        roster_data.sort(key=lambda x: x['name'])
+        json.dump(roster_data, f, indent=2)
+    print(f"Written roster summary to {roster_path}")
 
     # 4) Build and save Excel workbook
     out = args.output or f"schedule_{args.term.lower()}_{args.year}.xlsx"

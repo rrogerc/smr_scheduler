@@ -16,6 +16,7 @@ interface ScheduleFile {
   path: string;
   download_url: string;
   sha: string;
+  lastUpdated?: string; // Add timestamp field
 }
 
 interface RosterEntry {
@@ -59,6 +60,24 @@ export default function Home() {
     }
   }, []);
 
+  // Helper to fetch last commit date for a file
+  const fetchLastCommitDate = async (octokit: Octokit, path: string): Promise<string | undefined> => {
+    try {
+      const commits = await octokit.request('GET /repos/{owner}/{repo}/commits', {
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        path: path,
+        per_page: 1,
+      });
+      if (commits.data.length > 0) {
+        return commits.data[0].commit.committer?.date;
+      }
+    } catch (error) {
+      console.error(`Error fetching commit date for ${path}:`, error);
+    }
+    return undefined;
+  };
+
   const verifyAndLogin = async (authToken: string, isAutoLogin: boolean) => {
     if (isAutoLogin) setLoadingFiles(true);
     else setVerifying(true);
@@ -79,15 +98,28 @@ export default function Home() {
       setIsAuthenticated(true);
       
       if (Array.isArray(response.data)) {
-         const scheduleFiles = response.data
+         let scheduleFiles: ScheduleFile[] = response.data
           .filter((file: any) => file.name.endsWith('.xlsx'))
           .map((file: any) => ({
             name: file.name,
             path: file.path,
             download_url: file.download_url,
             sha: file.sha,
-          }))
-          .sort((a, b) => b.name.localeCompare(a.name));
+          }));
+        
+        // Fetch timestamps in parallel
+        scheduleFiles = await Promise.all(scheduleFiles.map(async (file) => {
+            const date = await fetchLastCommitDate(octokit, file.path);
+            return { ...file, lastUpdated: date };
+        }));
+
+        // Sort by date (newest first), falling back to name
+        scheduleFiles.sort((a, b) => {
+            if (a.lastUpdated && b.lastUpdated) {
+                return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+            }
+            return b.name.localeCompare(a.name);
+        });
         
         setFiles(scheduleFiles);
       }
@@ -220,15 +252,28 @@ export default function Home() {
       });
 
       if (Array.isArray(response.data)) {
-        const scheduleFiles = response.data
+        let scheduleFiles: ScheduleFile[] = response.data
           .filter((file: any) => file.name.endsWith('.xlsx'))
           .map((file: any) => ({
             name: file.name,
             path: file.path,
             download_url: file.download_url,
             sha: file.sha,
-          }))
-          .sort((a, b) => b.name.localeCompare(a.name));
+          }));
+
+         // Fetch timestamps in parallel
+         scheduleFiles = await Promise.all(scheduleFiles.map(async (file) => {
+            const date = await fetchLastCommitDate(octokit, file.path);
+            return { ...file, lastUpdated: date };
+        }));
+
+        // Sort by date (newest first), falling back to name
+        scheduleFiles.sort((a, b) => {
+            if (a.lastUpdated && b.lastUpdated) {
+                return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+            }
+            return b.name.localeCompare(a.name);
+        });
         
         setFiles(scheduleFiles);
       }
@@ -488,6 +533,16 @@ export default function Home() {
                                 <p className="truncate text-sm font-medium text-blue-600">{file.name}</p>
                                 <p className="mt-1 flex items-center text-xs text-gray-500">
                                   <span className="truncate">schedules/{file.name}</span>
+                                </p>
+                              </div>
+                              <div className="hidden md:block">
+                                <p className="text-xs text-gray-400">
+                                  Last updated:
+                                </p>
+                                <p className="text-xs text-gray-600">
+                                  {file.lastUpdated 
+                                    ? new Date(file.lastUpdated).toLocaleString() 
+                                    : 'Unknown'}
                                 </p>
                               </div>
                             </div>

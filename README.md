@@ -1,69 +1,58 @@
-# smr_scheduler
-This is the repository for the code to generate the term-based schedule for the Student Medical Response Team at the University of Calgary.
+# SMR Scheduler
+This code generates the term-based schedule for the Student Medical Response Team at the University of Calgary.
 
-If you have any suggestions, please feel free to send me an email. It's hard anticipating all the features you want as I'm not a club member and I've tried my best to design it well but I've missed something.
+If you have suggestions, feel free to email me. I've tried my best to design this well, but since I'm not a club member, I might have missed some nuances.
 
 ## How it Works
 
 ### Overview
-Instead of generating a schedule every month, the program now generates a schedule for an entire **Term** at once. 
+This program generates a schedule for an entire **Term** at once (4 months).
 
-- **Fall Term:** Covers September, October, November, and December.
-- **Winter Term:** Covers January, February, March, and April.
+- **Fall Term:** Sept - Dec
+- **Winter Term:** Jan - Apr
 
-The schedule is generated manually by the leadership team using the dashboard (see below) before the start of each term.
+Leaders use the dashboard to generate the schedule before each term starts. It takes everyone's availability and creates a single Excel sheet, aiming for 2 shifts per person per week.
 
-Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, strictly targeting **2 shifts per person per week**.
+### Key Features
 
-### Key Features & Changes (v2.0)
+#### 1. Scheduling Logic
+The system uses a mathematical algorithm (Network Flow) to create a **Master Weekly Template**. Instead of scheduling every week individually, it solves for one ideal week based on availability and applies that pattern to the whole term.
 
-#### 1. Scheduling Logic (Network Flow Optimization)
-The scheduling engine has been completely rewritten using a **Network Flow (Edmonds-Karp) Algorithm**. This is a mathematically robust approach that guarantees an optimal distribution of shifts while strictly adhering to constraints. It solves the schedule in three precise phases:
+This means:
+1.  **Consistency:** Your shift stays the same every week (e.g., always Tuesday 10-12).
+2.  **Fairness:** It strictly enforces the 2-shift cap.
+3.  **Stability:** No irregular shift distribution.
 
-1.  **Phase 1: Senior Spread:** Prioritizes placing at least one senior in every slot (where possible) by treating them as a "scarce resource" and spreading them thin.
-2.  **Phase 2: Senior Depth:** Allows slots to take a second senior if available (up to the strict limit of 2).
-3.  **Phase 3: Balanced Fill:** Iteratively fills the remaining spots with all members, ensuring shifts are spread as evenly as possible across the month (preventing "clumping" or uneven loading).
+**Constraints:**
+- **2 Shifts Max:** Everyone gets up to 2 shifts a week.
+- **Max 2 Seniors:** A slot can have at most 2 seniors.
+- **Max 5 People:** Total capacity per slot is 5.
+- **Multiple Shifts:** You can work multiple shifts in a day, but never two in the same time slot.
 
-**Core Constraints Enforced:**
-- **Strict 2-Shift Cap:** Everyone gets max 2 shifts per week. No exceptions.
-- **1 Shift Per Day:** No one is assigned back-to-back shifts or multiple shifts on the same day.
-- **Max 2 Seniors:** No slot ever exceeds 2 seniors.
-- **Max 5 People:** Hard limit on total slot capacity.
+#### 2. Excel Output
+The generated Excel sheet includes:
+- **Visual Pattern:** The grid uses an alternating color pattern to make rows easier to follow.
+- **Shift Count:** A tab showing total shifts and a monthly breakdown for each person.
+- **Senior Highlighting:** Seniors are highlighted in blue.
+- **Warnings:** A list of any scheduling issues (e.g., if someone couldn't get 2 shifts).
 
-#### 2. Enhanced Excel Output
-The generated Excel sheet is now more detailed and user-friendly:
-- **Shift Count Tab:** Replaced the simple list with a detailed breakdown showing total shifts and a **month-by-month count** for each person.
-- **Visuals:** **Senior names** are now highlighted in **Bold Blue** directly in the calendar grid for easy identification.
-- **Warnings Tab:** A dedicated tab lists any scheduling issues (e.g., if a person couldn't be assigned 2 shifts due to availability).
-- **Timestamp:** Each sheet includes a "Generated On" timestamp (**in MST**) so you know exactly when the data was created.
+#### 3. Dashboard
+- **Smart Selection:** Automatically picks the relevant term based on today's date.
+- **Versioning:** Generating a new schedule creates a new version with a timestamp; it doesn't delete old ones.
 
-#### 3. Dashboard UI Improvements
-- **Smart Term Selection:** The dashboard now automatically selects the **closest relevant term** based on the current date (e.g., defaults to "Fall" if you visit in September).
-- **Versioning:** Schedules are now timestamped in **Calgary Time (MST)** (e.g., `schedule_Fall_2025_2025-12-31-15-30.xlsx`). Generating a new schedule **does not overwrite** the old one; it creates a new version.
-- **User Friendly:** Technical terms like "Personal Access Token" have been replaced with "Dashboard Password" for ease of use.
+### Data & Submissions
+Availability is assumed to be constant for the term. The program filters form submissions by date to ensure only current responses are used:
 
-### How the form uses the data
-First, what submissions does the program take in? In SMR, availability is generally assumed to be constant for the whole term based on your class schedule. To ensure we only use active members for the specific term, we filter submissions by date:
+- **Fall Term:** Submissions from Aug 1 - Nov 30.
+- **Winter Term:** Submissions from Dec 1 - Mar 31.
 
-- **For the Fall Term:** The program only considers submissions made between **August 1st and November 30th**.
-- **For the Winter Term:** The program only considers submissions made between **December 1st (of the previous year) and March 31st**.
-
-If a student submits the form multiple times during this window, the program will only take the **latest** submission based on their UCID. This allows students to update their availability by simply submitting the form again before the generation deadline.
-
-### Deterministic Solving
-The Network Flow algorithm is **fully deterministic**. This means if you run the program multiple times with the exact same availability data, it will produce the **exact same schedule** every time. There is no randomness or "dice rolling" involved. This ensures consistency and reproducibility for the leadership team.
+If a student submits multiple times, only their latest submission (by UCID) is used.
 
 ### Calendar Integration
-I've included in the output a ICS integration. The user just needs to click on the link in the spreadsheet and they can subscribe to it in their calendar app. This way, if any changes are made to the schedule their calendar will also be updated automatically.
+The "Shift Count" tab in the Excel sheet has a link for each person to subscribe to their personal calendar feed (ICS). This feed updates automatically if the schedule changes.
 
-## Dashboard (The UI)
-I've built a simple UI hosted on GitHub Pages so leaders can manually trigger a schedule generation.
-
-To use the dashboard:
-1. Log in with your **Dashboard Password** (GitHub Token).
-2. Choose the **Term** and **Year** from the global selector.
+## Using the Dashboard
+1. Log in with your password.
+2. Select the Term and Year.
 3. Click **Generate New Version**.
-4. The new Excel file will appear in the list once the GitHub Action finishes (usually takes ~30 seconds).
-
-## Security
-This repository needs to be public in order to do calendar integration. Because of this, I've hidden sensitive information like the Excel Sheet link and email keys using GitHub Secrets. I've also setup a hash for the ICS calendar links so the links for each person are random and have no identifying data.
+4. Wait about 3-4 minutes for the backend to finish, then refresh the list to see the new file.

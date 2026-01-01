@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm';
 const REPO_OWNER = 'rrogerc';
 const REPO_NAME = 'smr_scheduler';
 const WORKFLOW_ID = 'generate_term_schedule.yml'; // The filename of the workflow
-const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/'; // TODO: Add your Google Sheet URL here
+const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/13awWH0EprYSFEFwALH8BcIi-qB1TFSn6fPgNnlxzESo/edit?gid=1539534942#gid=1539534942';
 
 interface ScheduleFile {
   name: string;
@@ -419,27 +419,8 @@ export default function Home() {
               <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
                 {/* Generator Section */}
                 <div className="md:col-span-1 space-y-6">
-                  {/* Master Spreadsheet Link */}
-                  <div className="overflow-hidden rounded-lg bg-white shadow">
-                    <div className="bg-gray-800 px-4 py-3 sm:px-6">
-                      <h3 className="text-sm font-medium leading-6 text-white">Source Data</h3>
-                    </div>
-                    <div className="px-4 py-5 sm:p-6">
-                       <a 
-                         href={SPREADSHEET_URL} 
-                         target="_blank" 
-                         rel="noopener noreferrer"
-                         className="flex w-full items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500"
-                       >
-                         <ExternalLink className="mr-2 h-4 w-4" />
-                         Open Master Sheet
-                       </a>
-                       <p className="mt-2 text-xs text-gray-500">
-                         View the raw availability data in Google Sheets.
-                       </p>
-                    </div>
-                  </div>
-
+                  
+                  {/* Actions Component */}
                   <div className="overflow-hidden rounded-lg bg-white shadow">
                     <div className="bg-blue-600 px-4 py-5 sm:px-6">
                       <h3 className="text-lg font-medium leading-6 text-white">Actions</h3>
@@ -469,6 +450,28 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Source Data Component */}
+                  <div className="overflow-hidden rounded-lg bg-white shadow">
+                    <div className="bg-gray-800 px-4 py-3 sm:px-6">
+                      <h3 className="text-sm font-medium leading-6 text-white">Source Data</h3>
+                    </div>
+                    <div className="px-4 py-5 sm:p-6">
+                       <a 
+                         href={SPREADSHEET_URL} 
+                         target="_blank" 
+                         rel="noopener noreferrer"
+                         className="flex w-full items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500"
+                       >
+                         <ExternalLink className="mr-2 h-4 w-4" />
+                         Open Master Sheet
+                       </a>
+                       <p className="mt-2 text-xs text-gray-500">
+                         View the raw availability data in Google Sheets.
+                       </p>
+                    </div>
+                  </div>
+
                 </div>
 
                 {/* List Section */}

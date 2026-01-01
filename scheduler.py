@@ -120,9 +120,9 @@ def load_availability(path):
 
     people = []
     for _, row in df.iterrows():
-        first = row[first_name_col] if first_name_col else ''
-        last = row[last_name_col] if last_name_col else ''
-        name = f"{first} {last}".strip()
+        first = str(row[first_name_col]).strip() if first_name_col and not pd.isna(row[first_name_col]) else ''
+        last = str(row[last_name_col]).strip() if last_name_col and not pd.isna(row[last_name_col]) else ''
+        name = " ".join(filter(None, [first, last]))
 
         ucid = str(row[ucid_col]).strip() if ucid_col else ''
         senior_raw = str(row[senior_col]).strip().lower() if senior_col else ''

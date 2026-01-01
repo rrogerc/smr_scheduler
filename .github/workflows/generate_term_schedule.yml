@@ -84,25 +84,3 @@ jobs:
             git commit -m "📅 Term schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}"
             git push
           fi
-
-      # 8) Email schedule
-      - name: Email schedule
-        uses: dawidd6/action-send-mail@v3
-        with:
-          # Note: server_address is for Gmail by default.
-          # You may need to change it for other providers.
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "SMR Schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}"
-          to: ${{ secrets.MAIL_TO }}
-          from: SMR Scheduler Bot <${{ secrets.MAIL_USERNAME }}>
-          body: |
-            Hi,
-
-            Attached is the SMR schedule for ${{ steps.vars.outputs.term }} ${{ steps.vars.outputs.year }}.
-
-            Best,
-            The Scheduler Bot
-          attachments: schedules/schedule_${{ steps.vars.outputs.term }}_${{ steps.vars.outputs.year }}.xlsx

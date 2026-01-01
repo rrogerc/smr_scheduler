@@ -36,6 +36,9 @@ Availability is assumed to be constant for the term. The program filters form su
 
 If a student submits multiple times, only their latest submission (by UCID) is used. This means if someone messes up one of their submission they just need to submit a new one.
 
+
+Alternatively, if their are any issues the leadership can click on the Source Data button and fix the submission themselves.
+
 ### Calendar Integration
 The "Shift Count" tab in the Excel sheet has a link for each person to subscribe to their personal calendar feed (ICS). This feed updates automatically if the schedule changes.
 

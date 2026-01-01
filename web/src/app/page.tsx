@@ -9,7 +9,7 @@ import remarkGfm from 'remark-gfm';
 // Configuration - Update these if the repo owner/name changes
 const REPO_OWNER = 'rrogerc';
 const REPO_NAME = 'smr_scheduler';
-const WORKFLOW_ID = 'generate_schedule.yml'; // The filename of the workflow
+const WORKFLOW_ID = 'generate_term_schedule.yml'; // The filename of the workflow
 
 interface ScheduleFile {
   name: string;

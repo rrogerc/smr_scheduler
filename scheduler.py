@@ -10,9 +10,70 @@ import calendar
 import argparse
 import hashlib
 import random
+import collections
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 TIME_SLOTS = ["8AM-10AM", "10AM-12PM", "12PM-2PM", "2PM-4PM", "4PM-6PM"]
+DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+# ─── MAX FLOW SOLVER (Edmonds-Karp) ────────────────────────────────────
+class FlowSolver:
+    def __init__(self):
+        self.graph = collections.defaultdict(dict) # u -> v -> capacity
+        self.flow = collections.defaultdict(dict)  # u -> v -> flow
+        
+    def add_edge(self, u, v, cap):
+        # Directed edge u->v with capacity
+        # If edge exists, add to capacity
+        self.graph[u][v] = self.graph[u].get(v, 0) + cap
+        self.graph[v][u] = self.graph[v].get(u, 0) + 0 # Residual edge
+        
+        # Initialize flow
+        if v not in self.flow[u]: self.flow[u][v] = 0
+        if u not in self.flow[v]: self.flow[v][u] = 0
+
+    def bfs(self, s, t, parent):
+        visited = {s}
+        queue = collections.deque([s])
+        
+        while queue:
+            u = queue.popleft()
+            if u == t:
+                return True
+            
+            for v, cap in self.graph[u].items():
+                # Check residual capacity
+                if v not in visited and cap - self.flow[u][v] > 0:
+                    visited.add(v)
+                    parent[v] = u
+                    queue.append(v)
+        return False
+
+    def max_flow(self, s, t):
+        max_f = 0
+        while True:
+            parent = {}
+            if not self.bfs(s, t, parent):
+                break
+            
+            # Find path flow
+            path_flow = float('inf')
+            v = t
+            while v != s:
+                u = parent[v]
+                path_flow = min(path_flow, self.graph[u][v] - self.flow[u][v])
+                v = u
+            
+            # Update residual capacities
+            v = t
+            while v != s:
+                u = parent[v]
+                self.flow[u][v] += path_flow
+                self.flow[v][u] -= path_flow
+                v = u
+                
+            max_f += path_flow
+        return max_f
 
 # ─── LOAD AVAILABILITY ──────────────────────────────────────────────────────
 
@@ -45,8 +106,7 @@ def load_availability(path):
     senior_col = _find_col(df, 'senior')
 
     # Dynamically find availability columns
-    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
-    avail_cols = {day: _find_col(df, day) for day in days}
+    avail_cols = {day.lower(): _find_col(df, day.lower()) for day in DAYS_OF_WEEK}
 
     # Check for missing columns
     missing = [k for k, v in {
@@ -81,12 +141,153 @@ def load_availability(path):
             'ucid': ucid,
             'senior': senior,
             'availability': availability,
-            # We'll track assignments differently now, but keeping this structure for ICS if needed
-            'assignments': {} 
         })
     return people
 
-# ─── ASSIGN SLOTS ──────────────────────────────────────────────────────────
+# ─── GENERATE MASTER TEMPLATE ──────────────────────────────────────────────
+
+def solve_weekly_template(people):
+    """
+    Generates a single static weekly schedule (Mon-Fri) using Max Flow.
+    Returns a dict: { 'Monday': { '8AM-10AM': [names], ... }, ... }
+    """
+    print("  > Generating Master Weekly Template (Mon-Fri)...")
+    
+    # Initialize Template
+    template = {day: {slot: [] for slot in TIME_SLOTS} for day in DAYS_OF_WEEK}
+    
+    # Helper to count shifts in the current template
+    person_counts = collections.defaultdict(int)
+
+    def run_flow_phase(target_group_filter, slot_cap_fn, description):
+        solver = FlowSolver()
+        SOURCE = "SOURCE"
+        SINK = "SINK"
+
+        active_people = [p for p in people if target_group_filter(p)]
+        
+        # Build Graph
+        for p in active_people:
+            name = p['name']
+            current_shifts = person_counts[name]
+            remaining_quota = 2 - current_shifts
+            
+            if remaining_quota <= 0:
+                continue
+
+            # Edge: SOURCE -> PERSON (Capacity: remaining quota)
+            person_node = f"PERSON_{name}"
+            solver.add_edge(SOURCE, person_node, remaining_quota)
+
+            for day in DAYS_OF_WEEK:
+                # Enforce 1 shift per day: PERSON -> DAY_NODE (Capacity 1)
+                day_node = f"DAY_{name}_{day}"
+                solver.add_edge(person_node, day_node, 1)
+
+                for slot in TIME_SLOTS:
+                    # Check Availability
+                    if slot not in p['availability'].get(day, []):
+                        continue
+                    
+                    # Check Senior Limit (Max 2 seniors per slot)
+                    current_seniors_in_slot = len([
+                        x for x in template[day][slot] 
+                        if any(sp['name'] == x and sp['senior'] for sp in people)
+                    ])
+                    if p['senior'] and current_seniors_in_slot >= 2:
+                        continue
+                    
+                    # Check Slot Capacity for this Phase
+                    curr_total = len(template[day][slot])
+                    cap = slot_cap_fn(day, slot, curr_total)
+                    
+                    if cap > 0:
+                        slot_node = f"SLOT_{day}_{slot}"
+                        # Edge: DAY_NODE -> SLOT (Capacity 1)
+                        solver.add_edge(day_node, slot_node, 1)
+
+        # Connect Slots to Sink
+        for day in DAYS_OF_WEEK:
+            for slot in TIME_SLOTS:
+                curr_total = len(template[day][slot])
+                cap = slot_cap_fn(day, slot, curr_total)
+                if cap > 0:
+                    slot_node = f"SLOT_{day}_{slot}"
+                    solver.add_edge(slot_node, SINK, cap)
+
+        # Solve
+        max_f = solver.max_flow(SOURCE, SINK)
+        
+        # Commit Assignments
+        assigned_count = 0
+        for p in active_people:
+            name = p['name']
+            person_node = f"PERSON_{name}"
+            
+            if person_node not in solver.flow: continue
+            
+            for day_node, flow1 in solver.flow[person_node].items():
+                if flow1 > 0 and day_node.startswith("DAY_"):
+                    # Extract day
+                    parts = day_node.split('_') # DAY, Name..., DayName
+                    # Name might contain underscores, so best to recover DayName from suffix or graph structure
+                    # But wait, we iterate edges.
+                    
+                    # Easier: iterate the day nodes from graph construction? 
+                    # Actually, day_node is "DAY_{name}_{day}". 
+                    # day is the last part? Day names are fixed (Monday...Friday).
+                    # Let's trust the suffix.
+                    day = parts[-1] 
+                    
+                    for slot_node, flow2 in solver.flow[day_node].items():
+                        if flow2 > 0 and slot_node.startswith("SLOT_"):
+                            # Found assignment
+                            slot_parts = slot_node.split('_')
+                            slot = slot_parts[2] # SLOT, Day, Slot
+                            
+                            template[day][slot].append(name)
+                            person_counts[name] += 1
+                            assigned_count += 1
+                            
+        print(f"    - {description}: Assigned {assigned_count} shifts.")
+
+    # ─── PHASES ───
+
+    # Phase 1: Senior Spread (Ensure at least 1 senior where possible)
+    def cap_phase1(day, slot, curr):
+        return 1 if curr == 0 else 0
+    run_flow_phase(lambda p: p['senior'], cap_phase1, "Phase 1 (Senior Spread)")
+
+    # Phase 2: Senior Depth (Allow up to 2 seniors)
+    def cap_phase2(day, slot, curr):
+        return 2 - curr if curr < 2 else 0
+    run_flow_phase(lambda p: p['senior'], cap_phase2, "Phase 2 (Senior Max)")
+
+    # Phase 3: General Fill (Fill up to 5 people)
+    for target_cap in range(1, 6):
+        def cap_phase_general(day, slot, curr):
+            if curr >= target_cap:
+                return 0
+            return target_cap - curr
+        run_flow_phase(lambda p: True, cap_phase_general, f"Phase 3 (General Fill - Cap {target_cap})")
+
+    # Generate Warnings for the Template
+    warnings = []
+    for p in people:
+        name = p['name']
+        if person_counts[name] < 2:
+            warnings.append(f"{name} has only {person_counts[name]} shifts in the weekly template.")
+            
+    for day in DAYS_OF_WEEK:
+        for slot in TIME_SLOTS:
+            assigned = template[day][slot]
+            has_senior = any(x for x in assigned if any(p['name'] == x and p['senior'] for p in people))
+            if assigned and not has_senior:
+                warnings.append(f"Template {day} {slot} has {len(assigned)} people but NO SENIOR.")
+
+    return template, warnings
+
+# ─── APPLY TEMPLATE TO CALENDAR ────────────────────────────────────────────
 
 def get_month_dates(month, year):
     cal = calendar.Calendar()
@@ -99,297 +300,26 @@ def get_month_dates(month, year):
         dates.append(dt)
     return sorted(dates)
 
-def assign_slots(people, month, year):
-    import collections
-    
-    # ─── MAX FLOW SOLVER (Edmonds-Karp) ────────────────────────────────────
-    class FlowSolver:
-        def __init__(self):
-            self.graph = collections.defaultdict(dict) # u -> v -> capacity
-            self.flow = collections.defaultdict(dict)  # u -> v -> flow
-            
-        def add_edge(self, u, v, cap):
-            # Directed edge u->v with capacity
-            # If edge exists, add to capacity
-            self.graph[u][v] = self.graph[u].get(v, 0) + cap
-            self.graph[v][u] = self.graph[v].get(u, 0) + 0 # Residual edge
-            
-            # Initialize flow
-            if v not in self.flow[u]: self.flow[u][v] = 0
-            if u not in self.flow[v]: self.flow[v][u] = 0
-
-        def bfs(self, s, t, parent):
-            visited = {s}
-            queue = collections.deque([s])
-            
-            while queue:
-                u = queue.popleft()
-                if u == t:
-                    return True
-                
-                for v, cap in self.graph[u].items():
-                    # Check residual capacity
-                    if v not in visited and cap - self.flow[u][v] > 0:
-                        visited.add(v)
-                        parent[v] = u
-                        queue.append(v)
-            return False
-
-        def max_flow(self, s, t):
-            max_f = 0
-            while True:
-                parent = {}
-                if not self.bfs(s, t, parent):
-                    break
-                
-                # Find path flow
-                path_flow = float('inf')
-                v = t
-                while v != s:
-                    u = parent[v]
-                    path_flow = min(path_flow, self.graph[u][v] - self.flow[u][v])
-                    v = u
-                
-                # Update residual capacities
-                v = t
-                while v != s:
-                    u = parent[v]
-                    self.flow[u][v] += path_flow
-                    self.flow[v][u] -= path_flow
-                    v = u
-                    
-                max_f += path_flow
-            return max_f
-
-    # ─── SETUP ─────────────────────────────────────────────────────────────
-    
-    # Data structures for results
+def apply_schedule_to_month(template, month, year):
+    """
+    Expands the generic weekly template onto specific dates for a month.
+    """
     dates = get_month_dates(month, year)
-    cal_assign = {dt: {slot: [] for slot in TIME_SLOTS} for dt in dates}
-    person_assign = {p['name']: [] for p in people}
+    cal_assign = {} # dt -> { slot: [names] }
+    person_assign = collections.defaultdict(list) # name -> [(dt, slot)]
     
-    # Identify Weeks
-    # We'll assign a 'week_index' to each date in 'dates'
-    # using calendar.monthdatescalendar logic
-    cal = calendar.Calendar()
-    weeks = cal.monthdatescalendar(year, month)
-    
-    # Map date -> week_index (0-based within the month)
-    date_to_week = {}
-    
-    # Filter weeks to those containing valid dates
-    # We need to align with 'dates' (which excludes weekends)
-    valid_week_indices = set()
-    
-    # We iterate through the standard calendar weeks
-    for w_idx, week_days in enumerate(weeks):
-        # check if any day in this week is in our 'dates' list
-        # (dates list already filters for this month + weekdays)
-        relevant = False
-        for d in week_days:
-            if d in dates:
-                date_to_week[d] = w_idx
-                relevant = True
-        if relevant:
-            valid_week_indices.add(w_idx)
-
-    sorted_week_indices = sorted(list(valid_week_indices))
-
-    # Helper to track person state across phases
-    # 1. shifts: Total shifts (for stats)
-    # 2. days_worked: Set of dates
-    # 3. week_counts: { week_index: count } to enforce 2/week
-    person_state = {
-        p['name']: {
-            'shifts': 0, 
-            'days_worked': set(),
-            'week_counts': collections.defaultdict(int)
-        } 
-        for p in people
-    }
-
-    # Helper: Flatten slots for easy indexing
-    all_slots = []
     for dt in dates:
-        dayname = calendar.day_name[dt.weekday()]
-        for slot in TIME_SLOTS:
-            all_slots.append((dt, slot, dayname))
-
-    def run_flow_phase(target_group_filter, slot_cap_fn, description):
-        """
-        Builds a fresh graph based on current state and solves max flow.
-        target_group_filter: func(person) -> bool (who to include)
-        slot_cap_fn: func(dt, slot, current_count) -> int (remaining capacity for this phase)
-        """
-        solver = FlowSolver()
-        SOURCE = "SOURCE"
-        SINK = "SINK"
+        day_name = calendar.day_name[dt.weekday()] # e.g., "Monday"
+        day_schedule = template.get(day_name, {})
         
-        # 1. Add Edges for People (Per Week)
-        active_people = [p for p in people if target_group_filter(p)]
+        cal_assign[dt] = {}
         
-        for p in active_people:
-            name = p['name']
-            state = person_state[name]
-            
-            # Instead of one edge per person, we have one edge per Person-Week
-            # SOURCE -> PERSON_{name}_WEEK_{w} (Capacity: 2 - current_usage)
-            
-            for w_idx in sorted_week_indices:
-                current_week_usage = state['week_counts'][w_idx]
-                remaining_quota = 2 - current_week_usage
+        for slot, names in day_schedule.items():
+            cal_assign[dt][slot] = list(names) # Copy list
+            for name in names:
+                person_assign[name].append((dt, slot))
                 
-                if remaining_quota <= 0:
-                    continue
-                
-                pw_node = f"PERSON_{name}_WEEK_{w_idx}"
-                solver.add_edge(SOURCE, pw_node, remaining_quota)
-                
-                # Connect Person-Week to valid Days in that week
-                # Find dates in this week
-                dates_in_week = [d for d, w in date_to_week.items() if w == w_idx]
-                
-                for dt in dates_in_week:
-                    if dt in state['days_worked']:
-                        continue # Already worked this day
-                    
-                    dayname = calendar.day_name[dt.weekday()]
-                    day_node = f"DAY_{name}_{dt.isoformat()}"
-                    
-                    # Check availability & slot logic
-                    day_has_slots = False
-                    
-                    for slot in TIME_SLOTS:
-                        if slot not in p['availability'].get(dayname, []):
-                            continue
-                        
-                        # Hard Constraint: Max 2 Seniors per slot
-                        seniors_in_slot = len([x for x in cal_assign[dt][slot] if any(sp['name'] == x and sp['senior'] for sp in people)])
-                        if p['senior'] and seniors_in_slot >= 2:
-                            continue
-                        
-                        # Check Slot Capacity
-                        curr = len(cal_assign[dt][slot])
-                        cap = slot_cap_fn(dt, slot, curr)
-                        if cap <= 0:
-                            continue
-                            
-                        # Add Edge: Day -> Slot
-                        slot_node = f"SLOT_{dt.isoformat()}_{slot}"
-                        solver.add_edge(day_node, slot_node, 1)
-                        day_has_slots = True
-                    
-                    if day_has_slots:
-                        # Person-Week -> Day (Capacity: 1) - Ensures 1 shift per day
-                        solver.add_edge(pw_node, day_node, 1)
-
-        # 2. Add Slot -> Sink Edges (Globally for this phase)
-        for dt, slot, _ in all_slots:
-            curr = len(cal_assign[dt][slot])
-            cap = slot_cap_fn(dt, slot, curr)
-            if cap > 0:
-                slot_node = f"SLOT_{dt.isoformat()}_{slot}"
-                solver.add_edge(slot_node, SINK, cap)
-
-        # 3. Solve
-        solver.max_flow(SOURCE, SINK)
-        
-        # 4. Extract Assignments & Update State
-        assigned_count = 0
-        for p in active_people:
-            name = p['name']
-            
-            # Trace flow: SOURCE -> Person-Week -> Day -> Slot
-            # We iterate all weeks for this person
-            for w_idx in sorted_week_indices:
-                pw_node = f"PERSON_{name}_WEEK_{w_idx}"
-                
-                if pw_node not in solver.flow: continue
-                
-                # Check edges from pw_node
-                for day_node, flow_val in solver.flow[pw_node].items():
-                    if flow_val > 0 and day_node.startswith("DAY_"):
-                        # Found a day assignment
-                        for slot_node, s_flow in solver.flow[day_node].items():
-                            if s_flow > 0 and slot_node.startswith("SLOT_"):
-                                parts = slot_node.split('_')
-                                date_str = parts[1]
-                                slot_str = parts[2]
-                                
-                                dt_obj = datetime.date.fromisoformat(date_str)
-                                
-                                # Commit Assignment
-                                cal_assign[dt_obj][slot_str].append(name)
-                                person_assign[name].append((dt_obj, slot_str))
-                                person_state[name]['shifts'] += 1
-                                person_state[name]['days_worked'].add(dt_obj)
-                                person_state[name]['week_counts'][w_idx] += 1
-                                assigned_count += 1
-        
-        print(f"    - {description}: Assigned {assigned_count} shifts.")
-
-    # ─── EXECUTION PHASES ──────────────────────────────────────────────────
-    
-    print(f"  > Network Flow Optimization for {calendar.month_name[month]}...")
-
-    # Phase 1: Senior Coverage (Spread)
-    # Target: Seniors only. Slot Cap: 1 (if empty).
-    def cap_phase1(dt, slot, curr):
-        return 1 if curr == 0 else 0
-        
-    run_flow_phase(lambda p: p['senior'], cap_phase1, "Phase 1 (Senior Spread)")
-    
-    # Phase 2: Senior Depth
-    # Target: Seniors only. Slot Cap: 2 (if <2 seniors).
-    def cap_phase2(dt, slot, curr):
-        return 2 - curr if curr < 2 else 0
-    
-    run_flow_phase(lambda p: p['senior'], cap_phase2, "Phase 2 (Senior Max)")
-    
-    # Phase 3: General Fill (Iterative Balance)
-    # Target: Everyone. 
-    for target_cap in range(1, 6):
-        def cap_phase_general(dt, slot, curr):
-            if curr >= target_cap:
-                return 0
-            return target_cap - curr
-
-        run_flow_phase(
-            lambda p: True, 
-            cap_phase_general, 
-            f"Phase 3 (General Fill - Cap {target_cap})"
-        )
-
-    # ─── WARNINGS ──────────────────────────────────────────────────────────
-    warnings = []
-    
-    # Check for people with < 2 shifts in any active week
-    # Or just warn if total shifts are low (rough check)
-    # Since weeks are variable, we'll iterate weeks and check.
-    
-    for p in people:
-        name = p['name']
-        p_weeks = person_state[name]['week_counts']
-        
-        low_weeks = []
-        for w_idx in sorted_week_indices:
-            if p_weeks[w_idx] < 2:
-                # Use the Monday of that week for display
-                # w_idx matches index in `weeks`
-                week_start = weeks[w_idx][0] # might be prev month
-                # find first date in this week that is in `dates` for better display?
-                # or just use week index.
-                low_weeks.append(f"Week {w_idx+1}")
-        
-        if low_weeks:
-            warnings.append(f"{name} has <2 shifts in: {', '.join(low_weeks)}")
-            
-    for dt, slot, _ in all_slots:
-        assigned = cal_assign[dt][slot]
-        if assigned and not any(x for x in assigned if any(p['name'] == x and p['senior'] for p in people)):
-             warnings.append(f"Slot {dt} {slot} has {len(assigned)} people but NO SENIOR.")
-
-    return cal_assign, person_assign, warnings
+    return cal_assign, person_assign
 
 # ─── ICS GENERATION ────────────────────────────────────────────────────────
 
@@ -637,6 +567,12 @@ def build_person_sheet(writer, person_assign, ics_links, months):
     
     # Reorder columns: Name, [Month1, Month2...], Total Shifts
     cols = ['Name'] + [calendar.month_name[m] for m in months] + ['Total Shifts']
+    
+    # Ensure all columns exist (in case no one worked a specific month)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = 0
+            
     df = df[cols] # Reorder
     
     df.to_excel(writer, sheet_name='Shift Count', index=False)
@@ -670,7 +606,7 @@ def build_person_sheet(writer, person_assign, ics_links, months):
 # ─── WARNINGS SHEET ─────────────────────────────────────────────────────────────
 
 
-def build_log_sheet(writer, cal_assign, warnings):
+def build_log_sheet(writer, warnings):
     wb = writer.book
     ws = wb.add_worksheet('Warnings')
     writer.sheets['Warnings'] = ws
@@ -718,25 +654,24 @@ def main():
     # 1) Load people (with UCID)
     people = load_availability(args.input)
     
-    # Aggregated results
+    # 2) Generate the MASTER WEEKLY TEMPLATE
+    # This solves the schedule for one ideal week (Mon-Fri)
+    template, warnings = solve_weekly_template(people)
+
+    # Aggregated results for output
     all_cal_assign = {}
-    all_person_assign = {p['name']: [] for p in people}
-    all_warnings = []
+    all_person_assign = collections.defaultdict(list) # name -> [(dt, slot)]
 
     for m in months:
-        print(f"Generating for {calendar.month_name[m]} {args.year}...")
-        cal_assign, person_assign, warnings = assign_slots(people, m, args.year)
+        print(f"Applying template to {calendar.month_name[m]} {args.year}...")
+        cal_assign, person_assign = apply_schedule_to_month(template, m, args.year)
         
         # Merge cal_assign
         all_cal_assign.update(cal_assign)
         
         # Merge person_assign
         for name, assigns in person_assign.items():
-            if name in all_person_assign:
-                all_person_assign[name].extend(assigns)
-        
-        # Merge warnings
-        all_warnings.extend(warnings)
+            all_person_assign[name].extend(assigns)
 
     # 3) Write per-person ICS feeds (hashed by UCID) and collect URLs
     ics_folder = "docs/ics"
@@ -746,7 +681,6 @@ def main():
         name = p['name']
         ucid = p['ucid']
         assigns = all_person_assign.get(name, [])
-        shift_count = len(assigns)
         
         ics_links[name] = write_person_ics(
             name,
@@ -773,7 +707,7 @@ def main():
         
         # Summary sheets
         build_person_sheet(writer, all_person_assign, ics_links, months)
-        build_log_sheet(writer, all_cal_assign, all_warnings)
+        build_log_sheet(writer, warnings)
 
     # 5) Summary output
     print(f"Written {args.term} term schedule + logs to {out}")

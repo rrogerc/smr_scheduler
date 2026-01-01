@@ -20,7 +20,7 @@ interface ScheduleFile {
 
 interface RosterEntry {
   name: string;
-  shifts: number;
+  shifts?: number;
 }
 
 type Tab = 'schedules' | 'roster' | 'how-it-works';
@@ -41,6 +41,11 @@ export default function Home() {
   // Form state
   const [selectedTerm, setSelectedTerm] = useState<string>('Fall');
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+
+  // Roster state
+  const [rosterTerm, setRosterTerm] = useState<string>('Fall');
+  const [rosterYear, setRosterYear] = useState<string>(new Date().getFullYear().toString());
+  const [refreshingRoster, setRefreshingRoster] = useState(false);
 
   const [verifying, setVerifying] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -87,16 +92,17 @@ export default function Home() {
         setFiles(scheduleFiles);
       }
 
-      // Also fetch README and Roster
+      // Also fetch README and Roster (default)
       fetchReadme(authToken);
-      fetchRoster(authToken);
+      fetchRoster(authToken, 'Fall', new Date().getFullYear().toString());
 
     } catch (error: any) {
       console.error('Login verification failed:', error);
       if (isAutoLogin) {
         localStorage.removeItem('smr_scheduler_token');
         setIsAuthenticated(false);
-      } else {
+      }
+      else {
         setLoginError("Access Denied. Please check that you copied the token correctly and try again.");
       }
     } finally {
@@ -116,7 +122,6 @@ export default function Home() {
       });
       
       if ('content' in response.data) {
-        // GitHub returns base64 encoded content
         const decoded = atob(response.data.content);
         setReadme(decoded);
       }
@@ -127,14 +132,15 @@ export default function Home() {
     }
   };
 
-  const fetchRoster = async (authToken: string) => {
+  const fetchRoster = async (authToken: string, term: string, year: string) => {
     setLoadingRoster(true);
+    setRoster([]); // Clear old roster while loading
     try {
       const octokit = new Octokit({ auth: authToken });
       const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
         owner: REPO_OWNER,
         repo: REPO_NAME,
-        path: 'docs/roster.json',
+        path: `docs/rosters/roster_${term}_${year}.json`,
       });
       
       if ('content' in response.data) {
@@ -149,6 +155,31 @@ export default function Home() {
       // It's okay if roster.json doesn't exist yet
     } finally {
       setLoadingRoster(false);
+    }
+  };
+
+  const handleRefreshRoster = async () => {
+    setRefreshingRoster(true);
+    setMessage(null);
+    try {
+      const octokit = new Octokit({ auth: token });
+      await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
+        owner: REPO_OWNER,
+        repo: REPO_NAME,
+        workflow_id: 'refresh_roster.yml',
+        ref: 'main',
+        inputs: {
+          term: rosterTerm,
+          year: rosterYear,
+        },
+      });
+
+      setMessage({ type: 'success', text: `Roster refresh triggered for ${rosterTerm} ${rosterYear}. It may take a minute.` });
+    } catch (error: any) {
+      console.error('Error triggering roster refresh:', error);
+      setMessage({ type: 'error', text: `Failed to refresh roster: ${error.message || 'Unknown error'}` });
+    } finally {
+      setRefreshingRoster(false);
     }
   };
 
@@ -458,14 +489,43 @@ export default function Home() {
           </>
         ) : activeTab === 'roster' ? (
           <div className="overflow-hidden rounded-lg bg-white shadow">
-            <div className="border-b border-gray-200 px-4 py-5 sm:px-6 flex justify-between items-center">
-              <h3 className="text-lg font-medium leading-6 text-gray-900">Roster (From Latest Schedule)</h3>
-              <button
-                onClick={() => fetchRoster(token)}
-                className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-500"
-              >
-                <RefreshCw className={`h-5 w-5 ${loadingRoster ? 'animate-spin' : ''}`} />
-              </button>
+            <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <h3 className="text-lg font-medium leading-6 text-gray-900">Roster (Raw Availability)</h3>
+                <div className="flex items-center space-x-2">
+                  <select
+                    value={rosterTerm}
+                    onChange={(e) => {
+                      setRosterTerm(e.target.value);
+                      fetchRoster(token, e.target.value, rosterYear);
+                    }}
+                    className="block rounded-md border-0 py-1.5 pl-3 pr-8 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                  >
+                    <option value="Fall">Fall</option>
+                    <option value="Winter">Winter</option>
+                  </select>
+                  <select
+                    value={rosterYear}
+                    onChange={(e) => {
+                      setRosterYear(e.target.value);
+                      fetchRoster(token, rosterTerm, e.target.value);
+                    }}
+                    className="block rounded-md border-0 py-1.5 pl-3 pr-8 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-blue-600 sm:text-sm sm:leading-6"
+                  >
+                    {[2024, 2025, 2026, 2027].map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleRefreshRoster}
+                    disabled={refreshingRoster}
+                    className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 text-gray-500 ${refreshingRoster ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="px-4 py-5 sm:p-6">
               {loadingRoster && roster.length === 0 ? (
@@ -474,8 +534,8 @@ export default function Home() {
                  </div>
               ) : roster.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
-                  <p>No roster data available.</p>
-                  <p className="text-sm mt-1">Generate a schedule to see the roster here.</p>
+                  <p>No roster data found for {rosterTerm} {rosterYear}.</p>
+                  <p className="text-sm mt-1">Click "Refresh" to pull the latest data from the spreadsheet.</p>
                 </div>
               ) : (
                 <div className="flow-root">
@@ -485,14 +545,18 @@ export default function Home() {
                         <thead>
                           <tr>
                             <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">Name</th>
-                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Shifts Assigned</th>
+                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {roster.map((person) => (
                             <tr key={person.name}>
                               <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">{person.name}</td>
-                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{person.shifts}</td>
+                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                                <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                                  Submitted
+                                </span>
+                              </td>
                             </tr>
                           ))}
                         </tbody>

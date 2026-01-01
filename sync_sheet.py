@@ -63,15 +63,15 @@ def main():
     term, year = args.term, args.year
     start_date, end_date = None, None
 
-    # Fall Term: Submissions from August 1st to November 30th.
+    # Fall Term: Submissions from May 1st to November 30th.
     if term == 'Fall':
-        start_date = datetime.date(year, 8, 1)
+        start_date = datetime.date(year, 5, 1)
         end_date = datetime.date(year, 11, 30)
         print(f"INFO: Filtering for Fall term ({year}) submissions: {start_date} to {end_date}")
 
-    # Winter Term: Submissions from December 1st (previous year) to March 31st.
+    # Winter Term: Submissions from October 1st (previous year) to March 31st.
     elif term == 'Winter':
-        start_date = datetime.date(year - 1, 12, 1)
+        start_date = datetime.date(year - 1, 10, 1)
         end_date = datetime.date(year, 3, 31)
         print(f"INFO: Filtering for Winter term ({year}) submissions: {start_date} to {end_date}")
 

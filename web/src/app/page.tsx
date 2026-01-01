@@ -247,7 +247,7 @@ export default function Home() {
       });
 
       if (response.status === 204) {
-        const msg = `Successfully triggered schedule generation for ${selectedTerm} ${selectedYear}. It may take 1-2 minutes to appear in the list.`;
+        const msg = `Successfully triggered schedule generation for ${selectedTerm} ${selectedYear}. It may take 3-4 minutes to generate; click the refresh button next to the version list to see it once finished.`;
         setMessage({ type: 'success', text: msg });
         alert(msg); // Immediate feedback
       } else {

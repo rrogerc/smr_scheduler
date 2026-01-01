@@ -658,7 +658,7 @@ def build_log_sheet(writer, cal_assign, warnings):
     writer.sheets['Warnings'] = ws
 
     # Add generation timestamp
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " MST"
     ws.write(0, 0, f"Generated On: {now}")
 
     df2 = pd.DataFrame([{'Warning': w} for w in warnings])

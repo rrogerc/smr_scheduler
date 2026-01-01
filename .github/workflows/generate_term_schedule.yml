@@ -48,8 +48,8 @@ jobs:
           # Use manual inputs
           echo "term=${{ inputs.term }}" >> $GITHUB_OUTPUT
           echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
-          # Generate timestamp for unique filename
-          echo "timestamp=$(date +'%Y-%m-%d-%H-%M')" >> $GITHUB_OUTPUT
+          # Generate timestamp for unique filename (MST/MDT)
+          echo "timestamp=$(TZ='America/Edmonton' date +'%Y-%m-%d-%H-%M')" >> $GITHUB_OUTPUT
           echo "Using manual input: ${{ inputs.term }} ${{ inputs.year }}"
 
       # 5) pull spreadsheet

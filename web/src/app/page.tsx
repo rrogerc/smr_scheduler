@@ -39,13 +39,33 @@ export default function Home() {
   const [readme, setReadme] = useState<string>('');
   const [loadingReadme, setLoadingReadme] = useState(false);
 
+  // Helper to determine the "closest" term based on current date
+  const getInitialTerm = () => {
+    const now = new Date();
+    const month = now.getMonth(); // 0-indexed: 0=Jan, 11=Dec
+    const year = now.getFullYear();
+
+    // August (7) to November (10) -> Fall of current year
+    if (month >= 7 && month <= 10) {
+      return { term: 'Fall', year: year.toString() };
+    }
+    // December (11) -> Winter of next year
+    if (month === 11) {
+      return { term: 'Winter', year: (year + 1).toString() };
+    }
+    // January (0) to July (6) -> Winter of current year
+    return { term: 'Winter', year: year.toString() };
+  };
+
+  const initial = getInitialTerm();
+
   // Form state
-  const [selectedTerm, setSelectedTerm] = useState<string>('Fall');
-  const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [selectedTerm, setSelectedTerm] = useState<string>(initial.term);
+  const [selectedYear, setSelectedYear] = useState<string>(initial.year);
 
   // Roster state
-  const [rosterTerm, setRosterTerm] = useState<string>('Fall');
-  const [rosterYear, setRosterYear] = useState<string>(new Date().getFullYear().toString());
+  const [rosterTerm, setRosterTerm] = useState<string>(initial.term);
+  const [rosterYear, setRosterYear] = useState<string>(initial.year);
   const [refreshingRoster, setRefreshingRoster] = useState(false);
 
   const [verifying, setVerifying] = useState(false);
@@ -126,7 +146,8 @@ export default function Home() {
 
       // Also fetch README and Roster (default)
       fetchReadme(authToken);
-      fetchRoster(authToken, 'Fall', new Date().getFullYear().toString());
+      const initial = getInitialTerm();
+      fetchRoster(authToken, initial.term, initial.year);
 
     } catch (error: any) {
       console.error('Login verification failed:', error);
@@ -546,9 +567,9 @@ export default function Home() {
                                // Try to make it readable (YYYY-MM-DD-HH-MM)
                                const dp = datePart.split('-');
                                if (dp.length >= 5) {
-                                  displayDate = `${dp[0]}-${dp[1]}-${dp[2]} at ${dp[3]}:${dp[4]}`;
+                                  displayDate = `${dp[0]}-${dp[1]}-${dp[2]} at ${dp[3]}:${dp[4]} (MST)`;
                                } else {
-                                  displayDate = datePart;
+                                  displayDate = datePart + " (MST)";
                                }
                              }
                              

@@ -13,9 +13,30 @@ Instead of generating a schedule every month, the program now generates a schedu
 
 The schedule is generated manually by the leadership team using the dashboard (see below) before the start of each term.
 
-Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, meaning that it aims for everyone to have roughly the same amount of shifts over the course of the term.
+Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, strictly targeting **2 shifts per person per month**.
 
-Because of this, I have included statistics. Inside the excel sheet there is a "Person Schedule" tab that contains the number of shifts everyone is working. In addition, there is also a "Log" tab and individual tabs for each month (e.g., "September 2025", "October 2025").
+### Key Features & Changes (v2.0)
+
+#### 1. Scheduling Logic (Fairness & Constraints)
+The algorithm has been overhauled to prioritize fairness and specific club constraints:
+- **Strict 2-Shift Cap:** The system prioritizes giving everyone exactly **2 shifts per month**. It will not assign a 3rd shift just to fill a seat.
+- **Slot Capacity:** Each time slot (e.g., 8AM-10AM) can hold up to **5 people**.
+- **Senior Constraints:** 
+    - Every slot aims to have **at least 1 senior**.
+    - No slot will ever have **more than 2 seniors**.
+- **Distribution:** Shifts are distributed intelligently to maximize coverage (i.e., slots with 0 people get filled before adding a 3rd person to another slot).
+
+#### 2. Enhanced Excel Output
+The generated Excel sheet is now more detailed and user-friendly:
+- **Shift Count Tab:** Replaced the simple list with a detailed breakdown showing total shifts and a **month-by-month count** for each person.
+- **Visuals:** **Senior names** are now highlighted in **Bold Blue** directly in the calendar grid for easy identification.
+- **Warnings Tab:** A dedicated tab lists any scheduling issues (e.g., if a person couldn't be assigned 2 shifts due to availability).
+- **Timestamp:** Each sheet includes a "Generated On" timestamp so you know exactly when the data was created.
+
+#### 3. Dashboard UI Improvements
+- **Global Term Selector:** A clear selector at the top controls both the view and the generator.
+- **Versioning:** Schedules are now timestamped (e.g., `schedule_Fall_2025_2025-12-31...`). Generating a new schedule **does not overwrite** the old one; it creates a new version.
+- **User Friendly:** Technical terms like "Personal Access Token" have been replaced with "Dashboard Password" for ease of use.
 
 ### How the form uses the data
 First, what submissions does the program take in? In SMR, availability is generally assumed to be constant for the whole term based on your class schedule. To ensure we only use active members for the specific term, we filter submissions by date:
@@ -25,22 +46,20 @@ First, what submissions does the program take in? In SMR, availability is genera
 
 If a student submits the form multiple times during this window, the program will only take the **latest** submission based on their UCID. This allows students to update their availability by simply submitting the form again before the generation deadline.
 
-### Scheduling Algorithm
-The program tries to be as fair as possible, as I described in the overview. There is also an issue of tiebreakers: if multiple people are vying for a time spot and they both have the same number of shifts that week, then how do you tie break? 
-
-I've decided to do it both randomly and deterministically. Basically, instead of using something unfair like alphabetical to tie-break, I've decided to create a hash. This means that whoever gets the time slot is random, but if you run the program again the same person will be chosen, hence the determinism.
+### Tie-Breaking
+If multiple people are vying for a time spot and they both have the same number of shifts that week, the tie-breaker is handled via a **deterministic hash**. This means the selection appears random but is consistent—if you run the program again with the same data, the same person will get the spot.
 
 ### Calendar Integration
 I've included in the output a ICS integration. The user just needs to click on the link in the spreadsheet and they can subscribe to it in their calendar app. This way, if any changes are made to the schedule their calendar will also be updated automatically.
 
 ## Dashboard (The UI)
-I've built a simple UI hosted on GitHub Pages so leaders can manually trigger a schedule generation if needed (e.g., if you need to remake the schedule in the middle of a term).
+I've built a simple UI hosted on GitHub Pages so leaders can manually trigger a schedule generation.
 
 To use the dashboard:
-1. Log in with a **GitHub Personal Access Token** (ask Roger for this if you don't have it).
-2. Choose the **Term** and **Year**.
-3. Click **Run Generator**.
-4. The new Excel file will appear in the list once the GitHub Action finishes (usually takes 1-2 minutes).
+1. Log in with your **Dashboard Password** (GitHub Token).
+2. Choose the **Term** and **Year** from the global selector.
+3. Click **Generate New Version**.
+4. The new Excel file will appear in the list once the GitHub Action finishes (usually takes ~30 seconds).
 
 ## Security
 This repository needs to be public in order to do calendar integration. Because of this, I've hidden sensitive information like the Excel Sheet link and email keys using GitHub Secrets. I've also setup a hash for the ICS calendar links so the links for each person are random and have no identifying data.

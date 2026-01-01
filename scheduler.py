@@ -240,6 +240,12 @@ def assign_slots(people, month, year):
                 person_assign[p['name']].append((dt, slot))
                 monthly_counts[p['name']] += 1
 
+    # Check for shift counts != 2
+    for p in people:
+        count = monthly_counts[p['name']]
+        if count != 2:
+            warnings.append(f"{p['name']} has {count} shifts in {calendar.month_name[month]} (Expected 2)")
+
     return cal_assign, person_assign, warnings
 
 # ─── ICS GENERATION ────────────────────────────────────────────────────────
@@ -447,15 +453,15 @@ def build_person_sheet(writer, person_assign, ics_links):
     import pandas as pd
 
     wb = writer.book
-    ws = wb.add_worksheet('Person Schedule')
-    writer.sheets['Person Schedule'] = ws
+    ws = wb.add_worksheet('Shift Count')
+    writer.sheets['Shift Count'] = ws
 
     # 1) Write Name and Total Shifts via DataFrame
     df = pd.DataFrame([
         {'Name': name, 'Total Shifts': len(assigns)}
         for name, assigns in person_assign.items()
     ])
-    df.to_excel(writer, sheet_name='Person Schedule', index=False)
+    df.to_excel(writer, sheet_name='Shift Count', index=False)
 
     # 2) Style header row
     hdr_fmt = wb.add_format({
@@ -483,44 +489,23 @@ def build_person_sheet(writer, person_assign, ics_links):
         formula = f'=HYPERLINK("{webcal_url}", "Subscribe")'
         ws.write_formula(row_idx, cal_col, formula, link_fmt)
 
-# ─── LOG SHEET ─────────────────────────────────────────────────────────────
+# ─── WARNINGS SHEET ─────────────────────────────────────────────────────────────
 
 
 def build_log_sheet(writer, cal_assign, warnings):
     wb = writer.book
-    ws = wb.add_worksheet('Log')
-    writer.sheets['Log'] = ws
+    ws = wb.add_worksheet('Warnings')
+    writer.sheets['Warnings'] = ws
 
-    rows = []
-    for dt, slots in sorted(cal_assign.items()):
-        if dt.weekday() >= 5:
-            continue
-        for slot, names in slots.items():
-            rows.append({
-                'Date': dt.strftime('%Y-%m-%d'),
-                'Slot': slot,
-                'Assigned': ', '.join(names)
-            })
-    df1 = pd.DataFrame(rows)
-    df1.to_excel(writer, sheet_name='Log', startrow=1, index=False)
-
-    start = len(rows)+3
-    ws.write(start, 0, 'Warnings')
     df2 = pd.DataFrame([{'Warning': w} for w in warnings])
-    df2.to_excel(writer, sheet_name='Log', startrow=start+1, index=False)
+    df2.to_excel(writer, sheet_name='Warnings', index=False)
 
     fmt_hdr = wb.add_format({
         'bold': True, 'bg_color': '#D9D9D9', 'border': 1
     })
-    # header for assignments and warnings
-    for col in range(3):
-        ws.write(
-            0 if col < len(df1.columns) else start,
-            col,
-            df1.columns[col] if col < len(df1.columns) else 'Warnings',
-            fmt_hdr
-        )
-    ws.set_column(0, 2, 25)
+    # header for warnings
+    ws.write(0, 0, 'Warnings', fmt_hdr)
+    ws.set_column(0, 0, 80)
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────
 

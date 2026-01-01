@@ -430,36 +430,47 @@ def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=Non
     ws = wb.add_worksheet(sheet_name)
     writer.sheets[sheet_name] = ws
 
-    # -- Modern Color Palette & Formats
-    # Colors: Header: #2C3E50 (Midnight Blue), DateHeader: #ECF0F1 (Cloud), Senior: #2980B9 (Belize Blue)
-    
+    # -- Formats
     title_fmt = wb.add_format({
-        'font_name': 'Arial', 'align': 'center', 'bold': True, 'font_size': 18, 'font_color': '#2C3E50'
+        'font_name': 'Arial', 'align': 'center', 'bold': True, 'font_size': 16
     })
     header_fmt = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'bold': True,
-        'bg_color': '#2C3E50', 'font_color': 'white', 'border': 1
+        'bg_color': '#D9D9D9', 'border': 1
     })
     date_fmt = wb.add_format({
-        'font_name': 'Arial', 'align': 'center', 'valign': 'top',
-        'bold': True, 'font_size': 11, 'border': 1, 'bg_color': '#ECF0F1'
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'bold': True, 'font_size': 12, 'border': 1
     })
     out_fmt = wb.add_format({
-        'border': 1, 'bg_color': '#F2F2F2' # Subtle gray
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'bg_color': '#A9A9A9'
+    })
+    cell_light = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10
+    })
+    cell_dark = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
+    })
+    # Senior formats (Bold + Blue text)
+    senior_light = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bold': True, 'font_color': 'blue'
+    })
+    senior_dark = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0', 'bold': True, 'font_color': 'blue'
     })
     
-    # Base cell styles
-    base_style = {'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter', 'border': 1, 'font_size': 10}
-    
-    cell_normal = wb.add_format(base_style)
-    cell_top = wb.add_format({**base_style, 'top': 2}) # Thick top border for new slot
-    
-    senior_normal = wb.add_format({**base_style, 'bold': True, 'font_color': '#2980B9'})
-    senior_top = wb.add_format({**base_style, 'bold': True, 'font_color': '#2980B9', 'top': 2})
-
-    time_label_fmt = wb.add_format({
+    time_light = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
-        'bold': True, 'border': 1, 'font_size': 10, 'bg_color': '#F8F9F9', 'top': 2
+        'bold': True, 'border': 1, 'font_size': 10
+    })
+    time_dark = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'bold': True, 'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
     })
 
     # -- Title & Headers
@@ -467,25 +478,28 @@ def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=Non
     total_cols = 1 + len(days)*2
     ws.merge_range(0, 0, 0, total_cols-1,
                    f"{calendar.month_name[month]} {year}", title_fmt)
-    ws.set_row(1, 25)
-    ws.set_column(0, 0, 15)  # Time-Slot col
+    ws.set_row(1, 20)
+    ws.set_column(0, 0, 20)  # Time-Slot col
     for i, d in enumerate(days):
         c0 = 1 + i*2
         ws.set_column(c0,   c0,   4)   # date col
-        ws.set_column(c0+1, c0+1, 22)  # assignment col
+        ws.set_column(c0+1, c0+1, 18)  # assignment col
         ws.merge_range(1, c0, 1, c0+1, d, header_fmt)
 
     # -- Grid
     cal = calendar.Calendar()
     weeks = cal.monthdays2calendar(year, month)
     row = 2
+    # Increase rows per day since we have up to 5 people
     names_per_slot = 5
     rows_per_day = len(TIME_SLOTS) * names_per_slot
 
     for week_idx, week in enumerate(weeks):
         start_row = row
+        # week-alt for Time-Slot labels
+        wk_fmt = time_dark if (week_idx % 2 == 0) else time_light
 
-        # Merge out-of-month columns
+        # merge out-of-month columns
         for i, (day, _) in enumerate(week):
             c0 = 1 + i*2
             if day == 0:
@@ -495,7 +509,7 @@ def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=Non
                     '', out_fmt
                 )
 
-        # Merge in-month date numbers
+        # merge in-month date numbers
         for i, (day, _) in enumerate(week):
             c0 = 1 + i*2
             if day != 0:
@@ -508,9 +522,11 @@ def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=Non
         # Time-Slot labels in col 0
         for si, slot in enumerate(TIME_SLOTS):
             r0 = start_row + si*names_per_slot
-            ws.merge_range(r0, 0, r0+names_per_slot-1, 0, slot, time_label_fmt)
+            ws.merge_range(r0, 0, r0+names_per_slot-1, 0, slot, wk_fmt)
 
-        # Assignments
+        # Assignments - Week + Slot alternating pattern
+        # (week_idx + si) % 2 ensures slots alternate within a week, 
+        # and the pattern flips every week to distinguish week boundaries.
         for i, (day, _) in enumerate(week):
             c1 = 1 + i*2 + 1
             if day == 0:
@@ -519,28 +535,30 @@ def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=Non
             for si, slot in enumerate(TIME_SLOTS):
                 names = cal_assign.get(dt, {}).get(slot, [])
                 
+                # Logic: Alternate by week index AND slot index
+                is_light = (week_idx + si) % 2 == 0
+                
                 for sub in range(names_per_slot):
                     r = start_row + si*names_per_slot + sub
-                    is_top = (sub == 0)
                     
                     if sub < len(names):
                         name = names[sub]
                         is_senior = any(p['senior'] for p in people if p['name'] == name)
                         
-                        if is_senior:
-                            fmt = senior_top if is_top else senior_normal
+                        if is_light:
+                            fmt = senior_light if is_senior else cell_light
                         else:
-                            fmt = cell_top if is_top else cell_normal
+                            fmt = senior_dark if is_senior else cell_dark
                             
                         ws.write(r, c1, name, fmt)
                     else:
                         # Empty cell
-                        fmt = cell_top if is_top else cell_normal
+                        fmt = cell_light if is_light else cell_dark
                         ws.write(r, c1, '', fmt)
 
-        # Set row heights
+        # compact row heights
         for r in range(start_row, start_row+rows_per_day):
-            ws.set_row(r, 16)
+            ws.set_row(r, 15)
 
         row += rows_per_day
 

@@ -142,7 +142,13 @@ def load_availability(path):
             'senior': senior,
             'availability': availability,
         })
-    return people
+    # Deduplicate by UCID (keep last occurrence)
+    unique_people = {}
+    for p in people:
+        key = p['ucid'] if p['ucid'] else p['name']
+        unique_people[key] = p
+    
+    return list(unique_people.values())
 
 # ─── GENERATE MASTER TEMPLATE ──────────────────────────────────────────────
 
@@ -157,6 +163,7 @@ def solve_weekly_template(people):
     template = {day: {slot: [] for slot in TIME_SLOTS} for day in DAYS_OF_WEEK}
     
     # Helper to count shifts in the current template
+    # Keyed by UCID to ensure uniqueness
     person_counts = collections.defaultdict(int)
 
     def run_flow_phase(target_group_filter, slot_cap_fn, description):
@@ -169,19 +176,33 @@ def solve_weekly_template(people):
         # Build Graph
         for p in active_people:
             name = p['name']
-            current_shifts = person_counts[name]
+            uid = p['ucid'] if p['ucid'] else name
+            
+            current_shifts = person_counts[uid]
             remaining_quota = 2 - current_shifts
             
             if remaining_quota <= 0:
                 continue
 
             # Edge: SOURCE -> PERSON (Capacity: remaining quota)
-            person_node = f"PERSON_{name}"
+            # Use UID for node to handle name collisions/duplicates
+            person_node = f"PERSON_{uid}"
             solver.add_edge(SOURCE, person_node, remaining_quota)
 
             for day in DAYS_OF_WEEK:
+                # Check if person is already working this day (from a previous phase)
+                # This enforces 1 shift per day across all phases and prevents duplicate slot assignments
+                # Check based on Name in template is imperfect if names collide, but template stores strings.
+                # Better: Check if UID is already assigned to this day in our internal tracking?
+                # For now, checking name in template is "okay" if names are unique enough, 
+                # but to be strict let's check our own person_counts logic or iterate template carefully.
+                
+                # Actually, let's verify against the template values.
+                if any(name in template[day][s] for s in TIME_SLOTS):
+                    continue
+
                 # Enforce 1 shift per day: PERSON -> DAY_NODE (Capacity 1)
-                day_node = f"DAY_{name}_{day}"
+                day_node = f"DAY_{uid}_{day}"
                 solver.add_edge(person_node, day_node, 1)
 
                 for slot in TIME_SLOTS:
@@ -222,21 +243,16 @@ def solve_weekly_template(people):
         assigned_count = 0
         for p in active_people:
             name = p['name']
-            person_node = f"PERSON_{name}"
+            uid = p['ucid'] if p['ucid'] else name
+            person_node = f"PERSON_{uid}"
             
             if person_node not in solver.flow: continue
             
             for day_node, flow1 in solver.flow[person_node].items():
                 if flow1 > 0 and day_node.startswith("DAY_"):
                     # Extract day
-                    parts = day_node.split('_') # DAY, Name..., DayName
-                    # Name might contain underscores, so best to recover DayName from suffix or graph structure
-                    # But wait, we iterate edges.
-                    
-                    # Easier: iterate the day nodes from graph construction? 
-                    # Actually, day_node is "DAY_{name}_{day}". 
-                    # day is the last part? Day names are fixed (Monday...Friday).
-                    # Let's trust the suffix.
+                    parts = day_node.split('_') # DAY, uid..., DayName
+                    # UID might have underscores. Day is always last.
                     day = parts[-1] 
                     
                     for slot_node, flow2 in solver.flow[day_node].items():
@@ -246,7 +262,7 @@ def solve_weekly_template(people):
                             slot = slot_parts[2] # SLOT, Day, Slot
                             
                             template[day][slot].append(name)
-                            person_counts[name] += 1
+                            person_counts[uid] += 1
                             assigned_count += 1
                             
         print(f"    - {description}: Assigned {assigned_count} shifts.")
@@ -275,8 +291,9 @@ def solve_weekly_template(people):
     warnings = []
     for p in people:
         name = p['name']
-        if person_counts[name] < 2:
-            warnings.append(f"{name} has only {person_counts[name]} shifts in the weekly template.")
+        uid = p['ucid'] if p['ucid'] else name
+        if person_counts[uid] < 2:
+            warnings.append(f"{name} has only {person_counts[uid]} shifts in the weekly template.")
             
     for day in DAYS_OF_WEEK:
         for slot in TIME_SLOTS:

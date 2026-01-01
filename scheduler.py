@@ -168,20 +168,47 @@ def assign_slots(people, month, year):
     cal_assign = {dt: {slot: [] for slot in TIME_SLOTS} for dt in dates}
     person_assign = {p['name']: [] for p in people}
     
+    # Identify Weeks
+    # We'll assign a 'week_index' to each date in 'dates'
+    # using calendar.monthdatescalendar logic
+    cal = calendar.Calendar()
+    weeks = cal.monthdatescalendar(year, month)
+    
+    # Map date -> week_index (0-based within the month)
+    date_to_week = {}
+    
+    # Filter weeks to those containing valid dates
+    # We need to align with 'dates' (which excludes weekends)
+    valid_week_indices = set()
+    
+    # We iterate through the standard calendar weeks
+    for w_idx, week_days in enumerate(weeks):
+        # check if any day in this week is in our 'dates' list
+        # (dates list already filters for this month + weekdays)
+        relevant = False
+        for d in week_days:
+            if d in dates:
+                date_to_week[d] = w_idx
+                relevant = True
+        if relevant:
+            valid_week_indices.add(w_idx)
+
+    sorted_week_indices = sorted(list(valid_week_indices))
+
     # Helper to track person state across phases
-    # We need to know:
-    # 1. How many shifts person has used (Max 2)
-    # 2. Which days they have worked (Max 1 per day)
+    # 1. shifts: Total shifts (for stats)
+    # 2. days_worked: Set of dates
+    # 3. week_counts: { week_index: count } to enforce 2/week
     person_state = {
-        p['name']: {'shifts': 0, 'days_worked': set()} 
+        p['name']: {
+            'shifts': 0, 
+            'days_worked': set(),
+            'week_counts': collections.defaultdict(int)
+        } 
         for p in people
     }
 
     # Helper: Flatten slots for easy indexing
-    # ID Format: "SLOT_{iso_date}_{slot_name}"
-    # Person ID: "PERSON_{name}"
-    # Day ID: "DAY_{name}_{iso_date}" (Intermediate node for 1-per-day)
-    
     all_slots = []
     for dt in dates:
         dayname = calendar.day_name[dt.weekday()]
@@ -198,70 +225,63 @@ def assign_slots(people, month, year):
         SOURCE = "SOURCE"
         SINK = "SINK"
         
-        # 1. Add Edges for People
+        # 1. Add Edges for People (Per Week)
         active_people = [p for p in people if target_group_filter(p)]
         
         for p in active_people:
             name = p['name']
             state = person_state[name]
             
-            # shifts_needed = 2 - shifts_done
-            # But in this specific phase, we might only want to assign 1 more.
-            # However, max flow will naturally fill up to capacity.
-            remaining_quota = 2 - state['shifts']
-            if remaining_quota <= 0:
-                continue
-                
-            # S -> Person (Capacity: Remaining quota)
-            p_node = f"PERSON_{name}"
-            solver.add_edge(SOURCE, p_node, remaining_quota)
+            # Instead of one edge per person, we have one edge per Person-Week
+            # SOURCE -> PERSON_{name}_WEEK_{w} (Capacity: 2 - current_usage)
             
-            # Person -> Day -> Slot
-            # We iterate dates to build the "Day" nodes
-            for dt in dates:
-                if dt in state['days_worked']:
-                    continue # Already worked this day
+            for w_idx in sorted_week_indices:
+                current_week_usage = state['week_counts'][w_idx]
+                remaining_quota = 2 - current_week_usage
                 
-                dayname = calendar.day_name[dt.weekday()]
-                day_node = f"DAY_{name}_{dt.isoformat()}"
+                if remaining_quota <= 0:
+                    continue
                 
-                # Check if person is available for ANY slot on this day
-                # to decide if we even create the Day node
-                # (Optimization: Only create edge if >0 valid slots)
-                day_has_slots = False
+                pw_node = f"PERSON_{name}_WEEK_{w_idx}"
+                solver.add_edge(SOURCE, pw_node, remaining_quota)
                 
-                for slot in TIME_SLOTS:
-                    if slot not in p['availability'].get(dayname, []):
-                        continue
+                # Connect Person-Week to valid Days in that week
+                # Find dates in this week
+                dates_in_week = [d for d, w in date_to_week.items() if w == w_idx]
+                
+                for dt in dates_in_week:
+                    if dt in state['days_worked']:
+                        continue # Already worked this day
                     
-                    # Hard Constraint: Max 2 Seniors per slot
-                    # We must check this even in general fill to prevent seniors from over-stacking
-                    seniors_in_slot = len([x for x in cal_assign[dt][slot] if any(sp['name'] == x and sp['senior'] for sp in people)])
-                    if p['senior'] and seniors_in_slot >= 2:
-                        continue
+                    dayname = calendar.day_name[dt.weekday()]
+                    day_node = f"DAY_{name}_{dt.isoformat()}"
                     
-                    # Check Slot Capacity
-                    curr = len(cal_assign[dt][slot])
-                    cap = slot_cap_fn(dt, slot, curr)
-                    if cap <= 0:
-                        continue
+                    # Check availability & slot logic
+                    day_has_slots = False
+                    
+                    for slot in TIME_SLOTS:
+                        if slot not in p['availability'].get(dayname, []):
+                            continue
                         
-                    # Add Edge: Day -> Slot
-                    slot_node = f"SLOT_{dt.isoformat()}_{slot}"
-                    solver.add_edge(day_node, slot_node, 1)
-                    day_has_slots = True
+                        # Hard Constraint: Max 2 Seniors per slot
+                        seniors_in_slot = len([x for x in cal_assign[dt][slot] if any(sp['name'] == x and sp['senior'] for sp in people)])
+                        if p['senior'] and seniors_in_slot >= 2:
+                            continue
+                        
+                        # Check Slot Capacity
+                        curr = len(cal_assign[dt][slot])
+                        cap = slot_cap_fn(dt, slot, curr)
+                        if cap <= 0:
+                            continue
+                            
+                        # Add Edge: Day -> Slot
+                        slot_node = f"SLOT_{dt.isoformat()}_{slot}"
+                        solver.add_edge(day_node, slot_node, 1)
+                        day_has_slots = True
                     
-                    # Add Edge: Slot -> Sink (Capacity: cap)
-                    # Note: Multiple people point to Slot, Slot points to Sink.
-                    # We set Slot->Sink capacity ONCE.
-                    # In this simple implementation, calling add_edge multiple times adds to capacity.
-                    # So we must guard to add Slot->Sink only once.
-                    # But wait, our Solver `add_edge` ADDS capacity.
-                    # So we should strictly add Slot->Sink OUTSIDE this loop.
-                
-                if day_has_slots:
-                    # Person -> Day (Capacity: 1) - Ensures 1 shift per day
-                    solver.add_edge(p_node, day_node, 1)
+                    if day_has_slots:
+                        # Person-Week -> Day (Capacity: 1) - Ensures 1 shift per day
+                        solver.add_edge(pw_node, day_node, 1)
 
         # 2. Add Slot -> Sink Edges (Globally for this phase)
         for dt, slot, _ in all_slots:
@@ -278,32 +298,33 @@ def assign_slots(people, month, year):
         assigned_count = 0
         for p in active_people:
             name = p['name']
-            p_node = f"PERSON_{name}"
             
-            # Trace flow: Person -> Day -> Slot
-            if p_node not in solver.flow: continue
-            
-            for day_node, flow_val in solver.flow[p_node].items():
-                if flow_val > 0 and day_node.startswith("DAY_"):
-                    # Found a day assignment. Now find which slot.
-                    for slot_node, s_flow in solver.flow[day_node].items():
-                        if s_flow > 0 and slot_node.startswith("SLOT_"):
-                            # Parse Slot ID
-                            # SLOT_2025-01-01_8AM-10AM
-                            parts = slot_node.split('_')
-                            date_str = parts[1]
-                            slot_str = parts[2]
-                            
-                            # Convert back to object
-                            # (We know dt because we have the date_str)
-                            dt_obj = datetime.date.fromisoformat(date_str)
-                            
-                            # Commit Assignment
-                            cal_assign[dt_obj][slot_str].append(name)
-                            person_assign[name].append((dt_obj, slot_str))
-                            person_state[name]['shifts'] += 1
-                            person_state[name]['days_worked'].add(dt_obj)
-                            assigned_count += 1
+            # Trace flow: SOURCE -> Person-Week -> Day -> Slot
+            # We iterate all weeks for this person
+            for w_idx in sorted_week_indices:
+                pw_node = f"PERSON_{name}_WEEK_{w_idx}"
+                
+                if pw_node not in solver.flow: continue
+                
+                # Check edges from pw_node
+                for day_node, flow_val in solver.flow[pw_node].items():
+                    if flow_val > 0 and day_node.startswith("DAY_"):
+                        # Found a day assignment
+                        for slot_node, s_flow in solver.flow[day_node].items():
+                            if s_flow > 0 and slot_node.startswith("SLOT_"):
+                                parts = slot_node.split('_')
+                                date_str = parts[1]
+                                slot_str = parts[2]
+                                
+                                dt_obj = datetime.date.fromisoformat(date_str)
+                                
+                                # Commit Assignment
+                                cal_assign[dt_obj][slot_str].append(name)
+                                person_assign[name].append((dt_obj, slot_str))
+                                person_state[name]['shifts'] += 1
+                                person_state[name]['days_worked'].add(dt_obj)
+                                person_state[name]['week_counts'][w_idx] += 1
+                                assigned_count += 1
         
         print(f"    - {description}: Assigned {assigned_count} shifts.")
 
@@ -313,42 +334,22 @@ def assign_slots(people, month, year):
 
     # Phase 1: Senior Coverage (Spread)
     # Target: Seniors only. Slot Cap: 1 (if empty).
-    # Goal: Get 1 senior into every slot that needs one.
     def cap_phase1(dt, slot, curr):
-        # We want to fill up to 1 person (senior)
-        # If already has 1, cap is 0.
         return 1 if curr == 0 else 0
         
     run_flow_phase(lambda p: p['senior'], cap_phase1, "Phase 1 (Senior Spread)")
     
     # Phase 2: Senior Depth
     # Target: Seniors only. Slot Cap: 2 (if <2 seniors).
-    # Goal: Allow 2nd senior.
     def cap_phase2(dt, slot, curr):
-        # We enforce strict max 2 seniors.
-        # Current 'curr' are all seniors (from Phase 1).
         return 2 - curr if curr < 2 else 0
     
     run_flow_phase(lambda p: p['senior'], cap_phase2, "Phase 2 (Senior Max)")
     
     # Phase 3: General Fill (Iterative Balance)
     # Target: Everyone. 
-    # Strategy: Fill slots layer by layer (1, then 2, then 3...) to maximize spread.
     for target_cap in range(1, 6):
         def cap_phase_general(dt, slot, curr):
-            # We want to fill up to 'target_cap'
-            # But we also must respect the global hard limit of 5 (which target_cap handles naturally)
-            # And we must respect Max 2 Seniors (handled by pre-check or just robustness).
-            
-            # Note: We rely on the fact that if a slot has 2 seniors, 
-            # non-seniors can still fill it up to 5.
-            # If a slot has 2 seniors, can a 3rd senior join?
-            # ideally NO. 
-            # But filtering purely by capacity in a mixed graph is hard.
-            # However, since we already maximized seniors in Ph2, it's unlikely a senior 
-            # finds a NEW path now that wasn't there before, unless they displace a junior?
-            # (Edmonds-Karp doesn't displace).
-            
             if curr >= target_cap:
                 return 0
             return target_cap - curr
@@ -361,10 +362,27 @@ def assign_slots(people, month, year):
 
     # ─── WARNINGS ──────────────────────────────────────────────────────────
     warnings = []
+    
+    # Check for people with < 2 shifts in any active week
+    # Or just warn if total shifts are low (rough check)
+    # Since weeks are variable, we'll iterate weeks and check.
+    
     for p in people:
-        c = person_state[p['name']]['shifts']
-        if c < 2:
-            warnings.append(f"{p['name']} has {c} shifts in {calendar.month_name[month]} (Target: 2)")
+        name = p['name']
+        p_weeks = person_state[name]['week_counts']
+        
+        low_weeks = []
+        for w_idx in sorted_week_indices:
+            if p_weeks[w_idx] < 2:
+                # Use the Monday of that week for display
+                # w_idx matches index in `weeks`
+                week_start = weeks[w_idx][0] # might be prev month
+                # find first date in this week that is in `dates` for better display?
+                # or just use week index.
+                low_weeks.append(f"Week {w_idx+1}")
+        
+        if low_weeks:
+            warnings.append(f"{name} has <2 shifts in: {', '.join(low_weeks)}")
             
     for dt, slot, _ in all_slots:
         assigned = cal_assign[dt][slot]

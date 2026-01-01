@@ -13,7 +13,7 @@ Instead of generating a schedule every month, the program now generates a schedu
 
 The schedule is generated manually by the leadership team using the dashboard (see below) before the start of each term.
 
-Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, strictly targeting **2 shifts per person per month**.
+Based on everyone's availability, it generates a single Excel sheet for the next 4 months. It aims to be as "fair" as possible, strictly targeting **2 shifts per person per week**.
 
 ### Key Features & Changes (v2.0)
 
@@ -25,7 +25,7 @@ The scheduling engine has been completely rewritten using a **Network Flow (Edmo
 3.  **Phase 3: Balanced Fill:** Iteratively fills the remaining spots with all members, ensuring shifts are spread as evenly as possible across the month (preventing "clumping" or uneven loading).
 
 **Core Constraints Enforced:**
-- **Strict 2-Shift Cap:** Everyone gets max 2 shifts. No exceptions.
+- **Strict 2-Shift Cap:** Everyone gets max 2 shifts per week. No exceptions.
 - **1 Shift Per Day:** No one is assigned back-to-back shifts or multiple shifts on the same day.
 - **Max 2 Seniors:** No slot ever exceeds 2 seniors.
 - **Max 5 People:** Hard limit on total slot capacity.

@@ -17,27 +17,29 @@ Based on everyone's availability, it generates a single Excel sheet for the next
 
 ### Key Features & Changes (v2.0)
 
-#### 1. Scheduling Logic (Fairness & Constraints)
-The algorithm has been overhauled to prioritize fairness and specific club constraints:
-- **Strict 2-Shift Cap:** The system enforces a **strict maximum of 2 shifts per person per month**. It will **never** automatically assign a 3rd shift to anyone, even if slots remain empty.
-- **Under-Assignment:** If a member has limited availability and cannot be assigned 2 shifts, the system will assign what it can and list them in the **Warnings** tab. It is up to leadership to manually resolve these gaps.
-- **Slot Capacity:** Each time slot (e.g., 8AM-10AM) can hold up to **5 people**.
-- **Senior Constraints:** 
-    - Every slot aims to have **at least 1 senior**.
-    - No slot will ever have **more than 2 seniors**.
-    - If no senior is available (or all available seniors have reached their 2-shift cap), the slot may remain without a senior, and a warning will be logged.
-- **Distribution:** Shifts are distributed intelligently to maximize coverage (i.e., slots with 0 people get filled before adding a 3rd person to another slot).
+#### 1. Scheduling Logic (Network Flow Optimization)
+The scheduling engine has been completely rewritten using a **Network Flow (Edmonds-Karp) Algorithm**. This is a mathematically robust approach that guarantees an optimal distribution of shifts while strictly adhering to constraints. It solves the schedule in three precise phases:
+
+1.  **Phase 1: Senior Spread:** Prioritizes placing at least one senior in every slot (where possible) by treating them as a "scarce resource" and spreading them thin.
+2.  **Phase 2: Senior Depth:** Allows slots to take a second senior if available (up to the strict limit of 2).
+3.  **Phase 3: Balanced Fill:** Iteratively fills the remaining spots with all members, ensuring shifts are spread as evenly as possible across the month (preventing "clumping" or uneven loading).
+
+**Core Constraints Enforced:**
+- **Strict 2-Shift Cap:** Everyone gets max 2 shifts. No exceptions.
+- **1 Shift Per Day:** No one is assigned back-to-back shifts or multiple shifts on the same day.
+- **Max 2 Seniors:** No slot ever exceeds 2 seniors.
+- **Max 5 People:** Hard limit on total slot capacity.
 
 #### 2. Enhanced Excel Output
 The generated Excel sheet is now more detailed and user-friendly:
 - **Shift Count Tab:** Replaced the simple list with a detailed breakdown showing total shifts and a **month-by-month count** for each person.
 - **Visuals:** **Senior names** are now highlighted in **Bold Blue** directly in the calendar grid for easy identification.
 - **Warnings Tab:** A dedicated tab lists any scheduling issues (e.g., if a person couldn't be assigned 2 shifts due to availability).
-- **Timestamp:** Each sheet includes a "Generated On" timestamp so you know exactly when the data was created.
+- **Timestamp:** Each sheet includes a "Generated On" timestamp (**in MST**) so you know exactly when the data was created.
 
 #### 3. Dashboard UI Improvements
-- **Global Term Selector:** A clear selector at the top controls both the view and the generator.
-- **Versioning:** Schedules are now timestamped (e.g., `schedule_Fall_2025_2025-12-31...`). Generating a new schedule **does not overwrite** the old one; it creates a new version.
+- **Smart Term Selection:** The dashboard now automatically selects the **closest relevant term** based on the current date (e.g., defaults to "Fall" if you visit in September).
+- **Versioning:** Schedules are now timestamped in **Calgary Time (MST)** (e.g., `schedule_Fall_2025_2025-12-31-15-30.xlsx`). Generating a new schedule **does not overwrite** the old one; it creates a new version.
 - **User Friendly:** Technical terms like "Personal Access Token" have been replaced with "Dashboard Password" for ease of use.
 
 ### How the form uses the data
@@ -48,8 +50,8 @@ First, what submissions does the program take in? In SMR, availability is genera
 
 If a student submits the form multiple times during this window, the program will only take the **latest** submission based on their UCID. This allows students to update their availability by simply submitting the form again before the generation deadline.
 
-### Tie-Breaking
-If multiple people are vying for a time spot and they both have the same number of shifts that week, the tie-breaker is handled via a **deterministic hash**. This means the selection appears random but is consistent—if you run the program again with the same data, the same person will get the spot.
+### Deterministic Solving
+The Network Flow algorithm is **fully deterministic**. This means if you run the program multiple times with the exact same availability data, it will produce the **exact same schedule** every time. There is no randomness or "dice rolling" involved. This ensures consistency and reproducibility for the leadership team.
 
 ### Calendar Integration
 I've included in the output a ICS integration. The user just needs to click on the link in the spreadsheet and they can subscribe to it in their calendar app. This way, if any changes are made to the schedule their calendar will also be updated automatically.

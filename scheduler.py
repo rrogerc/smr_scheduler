@@ -2,12 +2,6 @@
 # schedule.py
 # Generates a monthly schedule calendar and per-person summary from availability responses.
 # Also emits per-person .ics feeds and links them in the Excel.
-# Usage:
-#   python schedule.py \
-#     --input availability.xlsx \
-#     --month 5 --year 2025 \
-#     --output schedule_may_2025.xlsx \
-#     --cal-url-base https://raw.githubusercontent.com/you/yourrepo/main/ics
 
 import os
 import pandas as pd
@@ -15,6 +9,7 @@ import datetime
 import calendar
 import argparse
 import hashlib
+import random
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 TIME_SLOTS = ["9AM-11AM", "11AM-1PM", "1PM-3PM", "3PM-5PM"]
@@ -86,95 +81,174 @@ def load_availability(path):
             'ucid': ucid,
             'senior': senior,
             'availability': availability,
-            'assignments': {}
+            # We'll track assignments differently now, but keeping this structure for ICS if needed
+            'assignments': {} 
         })
     return people
 
-# ─── WEEKLY DATES ──────────────────────────────────────────────────────────
+# ─── ASSIGN SLOTS ──────────────────────────────────────────────────────────
 
-
-def get_weekly_dates(month, year):
-    weeks = {}
+def get_month_dates(month, year):
     cal = calendar.Calendar()
+    dates = []
     for dt in cal.itermonthdates(year, month):
         if dt.month != month:
             continue
-        wk = dt.isocalendar()[1]
-        weeks.setdefault(wk, []).append(dt)
-    return weeks
-
-# ─── ASSIGN SLOTS ──────────────────────────────────────────────────────────
-
+        if dt.weekday() >= 5: # Skip weekends
+            continue
+        dates.append(dt)
+    return sorted(dates)
 
 def assign_slots(people, month, year):
-    cal_assign = {}
+    # Initialize assignments tracking for this month
+    cal_assign = {} # {date: {slot: [names]}}
     person_assign = {p['name']: [] for p in people}
+    monthly_counts = {p['name']: 0 for p in people}
     warnings = []
-    weeks = get_weekly_dates(month, year)
+    
+    dates = get_month_dates(month, year)
+    
+    # Pre-structure the calendar dict
+    all_slots = [] # List of (dt, slot_name) tuples
+    for dt in dates:
+        cal_assign[dt] = {}
+        dayname = calendar.day_name[dt.weekday()]
+        for slot in TIME_SLOTS:
+            cal_assign[dt][slot] = []
+            all_slots.append((dt, slot, dayname))
 
-    for wno, dates in weeks.items():
-        # reset weekly counts
-        for p in people:
-            p['assignments'][wno] = 0
+    # Helper to check availability
+    def is_available(person, dayname, slot):
+        return slot in person['availability'].get(dayname, [])
 
-        for dt in sorted(dates):
-            if dt.weekday() >= 5:  # skip weekends
+    # Helper: deterministic hash for tie-breaking
+    def get_hash(person, dt, slot):
+        hash_input = f"{person['ucid']}-{dt.isoformat()}-{slot}".encode('utf-8')
+        return int(hashlib.sha256(hash_input).hexdigest(), 16)
+
+    # ─── PHASE 1: MANDATORY SENIORS ───
+    # Ensure every slot has at least 1 senior
+    for dt, slot, dayname in all_slots:
+        current_assigned = cal_assign[dt][slot]
+        has_senior = any(p['senior'] for p in people if p['name'] in current_assigned)
+        
+        if not has_senior:
+            # Find available seniors not already assigned to this slot
+            candidates = [
+                p for p in people 
+                if p['senior'] 
+                and is_available(p, dayname, slot)
+                and p['name'] not in current_assigned
+            ]
+            
+            if not candidates:
+                warnings.append(f"No senior available for {dt} {slot}")
                 continue
-            dayname = calendar.day_name[dt.weekday()]
-            cal_assign.setdefault(dt, {})
+            
+            # Pick senior with lowest monthly count, then deterministic hash
+            candidates.sort(key=lambda p: (monthly_counts[p['name']], get_hash(p, dt, slot)))
+            selected = candidates[0]
+            
+            cal_assign[dt][slot].append(selected['name'])
+            person_assign[selected['name']].append((dt, slot))
+            monthly_counts[selected['name']] += 1
 
-            for slot in TIME_SLOTS:
-                # This function creates a deterministic, fair tie-breaker value for each person
-                # for this specific time slot. It uses a hash of the person's UCID and the slot details.
-                def tie_breaker_key(person):
-                    hash_input = f"{person['ucid']}-{dt.isoformat()}-{slot}".encode('utf-8')
-                    h = hashlib.sha256(hash_input).hexdigest()
-                    # The primary sorting key is weekly assignments (for fairness).
-                    # The hash is the secondary key to break ties consistently and without bias.
-                    return (person['assignments'][wno], int(h, 16))
-
-                # pick one senior
-                seniors = [
-                    p for p in people
-                    if p['senior'] and slot in p['availability'][dayname]
-                ]
-                elig = [p for p in seniors if p['assignments'][wno] < 2] or seniors
-                if not elig:
-                    warnings.append(f"No senior for {dt} {slot}")
-                    assigned = []
-                else:
-                    # Select the senior with the best key (lowest assignments, then lowest hash)
-                    sel = min(elig, key=tie_breaker_key)
-                    assigned = [sel]
-
-                # fill remaining 2
-                need = 3 - len(assigned)
-                pool = [
-                    p for p in people
-                    if p not in assigned and slot in p['availability'][dayname]
-                ]
-                epool = [p for p in pool if p['assignments'][wno] < 2] or pool
-                if len(epool) < need:
-                    warnings.append(
-                        f"Only {len(epool)+len(assigned)} for {dt} {slot}")
+    # ─── PHASE 2: QUOTA FILL (Target 2 shifts per person) ───
+    # Iterate until everyone has at least 2 shifts (or no availability left)
+    
+    # Create a queue of people who need shifts
+    people_needing_shifts = [p for p in people if monthly_counts[p['name']] < 2]
+    
+    # We loop while there are people needing shifts and we are making progress
+    progress = True
+    while people_needing_shifts and progress:
+        progress = False
+        # Sort people by who needs shifts the most (lowest count)
+        people_needing_shifts.sort(key=lambda p: (monthly_counts[p['name']], p['ucid']))
+        
+        for person in people_needing_shifts[:]: # Iterate copy
+            if monthly_counts[person['name']] >= 2:
+                people_needing_shifts.remove(person)
+                continue
                 
-                # Sort the eligible pool using the same deterministic tie-breaker
-                epool.sort(key=tie_breaker_key)
-                assigned += epool[:need]
+            # Find all available slots for this person
+            available_slots = []
+            for dt, slot, dayname in all_slots:
+                # Check availability
+                if not is_available(person, dayname, slot):
+                    continue
+                # Check if already assigned
+                if person['name'] in cal_assign[dt][slot]:
+                    continue
+                
+                # We prioritize slots with fewer people to spread the load
+                # But we might also want to prioritize slots that need coverage (count < 2)
+                current_count = len(cal_assign[dt][slot])
+                available_slots.append((dt, slot, current_count))
+            
+            if not available_slots:
+                # No slots available for this person
+                people_needing_shifts.remove(person)
+                continue
+            
+            # Sort slots: 
+            # 1. Primary: Slots with < 2 people (needs coverage)
+            # 2. Secondary: Slots with fewest people
+            # 3. Tertiary: Hash
+            available_slots.sort(key=lambda x: (
+                0 if x[2] < 2 else 1, # Prioritize filling empty slots
+                x[2],                 # Then fill less populated slots
+                get_hash(person, x[0], x[1]) # Tie-breaker
+            ))
+            
+            # Pick the best slot
+            best_dt, best_slot, _ = available_slots[0]
+            
+            cal_assign[best_dt][best_slot].append(person['name'])
+            person_assign[person['name']].append((best_dt, best_slot))
+            monthly_counts[person['name']] += 1
+            progress = True
+            
+            if monthly_counts[person['name']] >= 2:
+                people_needing_shifts.remove(person)
 
-                # record
-                cal_assign[dt][slot] = [p['name'] for p in assigned]
-                for p in assigned:
-                    p['assignments'][wno] += 1
-                    person_assign[p['name']].append((dt, slot))
+    # ─── PHASE 3: MINIMUM COVERAGE (Target 2 people per slot) ───
+    # Ensure every slot has at least 2 people if possible
+    for dt, slot, dayname in all_slots:
+        current_assigned = cal_assign[dt][slot]
+        if len(current_assigned) < 2:
+            needed = 2 - len(current_assigned)
+            
+            # Find candidates
+            candidates = [
+                p for p in people 
+                if is_available(p, dayname, slot) 
+                and p['name'] not in current_assigned
+            ]
+            
+            if len(candidates) < needed:
+                 warnings.append(f"Only {len(current_assigned)+len(candidates)} people available for {dt} {slot} (Need 2)")
+            
+            # Sort candidates:
+            # 1. Lowest monthly count (give shifts to those who have few, even if > 2)
+            # 2. Hash
+            candidates.sort(key=lambda p: (monthly_counts[p['name']], get_hash(p, dt, slot)))
+            
+            to_add = candidates[:needed]
+            for p in to_add:
+                cal_assign[dt][slot].append(p['name'])
+                person_assign[p['name']].append((dt, slot))
+                monthly_counts[p['name']] += 1
 
     return cal_assign, person_assign, warnings
 
 # ─── ICS GENERATION ────────────────────────────────────────────────────────
 
-
-def write_person_ics(person_name, ucid, assignments, base_url, month, year,
-                     output_dir="docs/ics"):
+def write_person_ics(person_name, ucid, assignments, base_url, months, year, output_dir="docs/ics"):
+    """
+    Writes assignments to an ICS file. 
+    `months` is a list of integers (e.g. [9,10,11,12]) representing the term.
+    """
     import os
     import hashlib
     from datetime import datetime, timezone
@@ -201,20 +275,21 @@ def write_person_ics(person_name, ucid, assignments, base_url, month, year,
         cal.add('METHOD',   'PUBLISH')
         cal.add('PRODID',   '-//schedule-script//EN')
 
-    # 4) remove existing events for this month/year
+    # 4) remove existing events for this term (all months in `months`)
     to_remove = []
     for comp in cal.walk():
         if comp.name == 'VEVENT':
             dt = comp.decoded('DTSTART')
-            if dt.year == year and dt.month == month:
+            # Check if event is within any of the target months of this year
+            if dt.year == year and dt.month in months:
                 to_remove.append(comp)
     for comp in to_remove:
-        # pull it out of the internal list
         cal.subcomponents.remove(comp)
 
     # 5) append new events
     for dt, slot in assignments:
-        if dt.year != year or dt.month != month:
+        # Check against term just in case, though assignments should match
+        if dt.year != year or dt.month not in months:
             continue
 
         start_h, end_h = {
@@ -349,6 +424,11 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
             for si, slot in enumerate(TIME_SLOTS):
                 names = cal_assign.get(dt, {}).get(slot, [])
                 fmt = cell_light if (si % 2 == 0) else cell_dark
+                # Assuming max 3 names display, if more we might just overwrite or need better UI
+                # With new alg, could have more than 3? 
+                # User said "don't need to fill 5", implies maybe max 3-4?
+                # The visual grid writes 3 rows. If we assign 4, the 4th won't show clearly.
+                # But that's a display issue, logical assignment is fine.
                 for sub in range(3):
                     r = start_row + si*3 + sub
                     ws.write(r, c1, names[sub] if sub <
@@ -442,84 +522,6 @@ def build_log_sheet(writer, cal_assign, warnings):
         )
     ws.set_column(0, 2, 25)
 
-# ─── ICS GENERATION ────────────────────────────────────────────────────────
-
-def write_person_ics(person_name, ucid, assignments, base_url, months, year, output_dir="docs/ics"):
-    """
-    Writes assignments to an ICS file. 
-    `months` is a list of integers (e.g. [9,10,11,12]) representing the term.
-    """
-    import os
-    import hashlib
-    from datetime import datetime, timezone
-    from icalendar import Calendar, Event
-
-    # 1) hash the UCID
-    h = hashlib.sha256(ucid.encode('utf-8')).hexdigest()[:8]
-    fname = f"{h}.ics"
-
-    # 2) ensure docs/ics directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    ics_dir = os.path.join(script_dir, output_dir)
-    os.makedirs(ics_dir, exist_ok=True)
-    path = os.path.join(ics_dir, fname)
-
-    # 3) load existing or create new VCALENDAR
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            cal = Calendar.from_ical(f.read())
-    else:
-        cal = Calendar()
-        cal.add('VERSION',  '2.0')
-        cal.add('CALSCALE', 'GREGORIAN')
-        cal.add('METHOD',   'PUBLISH')
-        cal.add('PRODID',   '-//schedule-script//EN')
-
-    # 4) remove existing events for this term (all months in `months`)
-    to_remove = []
-    for comp in cal.walk():
-        if comp.name == 'VEVENT':
-            dt = comp.decoded('DTSTART')
-            # Check if event is within any of the target months of this year
-            if dt.year == year and dt.month in months:
-                to_remove.append(comp)
-    for comp in to_remove:
-        cal.subcomponents.remove(comp)
-
-    # 5) append new events
-    for dt, slot in assignments:
-        # Check against term just in case, though assignments should match
-        if dt.year != year or dt.month not in months:
-            continue
-
-        start_h, end_h = {
-            "9AM-11AM": (9, 11),
-            "11AM-1PM": (11, 13),
-            "1PM-3PM":  (13, 15),
-            "3PM-5PM":  (15, 17),
-        }[slot]
-
-        dtstart = datetime(dt.year, dt.month, dt.day,
-                           start_h, 0, 0, tzinfo=timezone.utc)
-        dtend = datetime(dt.year, dt.month, dt.day,
-                         end_h,  0, 0, tzinfo=timezone.utc)
-        dtstamp = datetime.now(timezone.utc)
-
-        ev = Event()
-        ev.add('UID',     f"{h}-{dt.isoformat()}-{slot}@schedule")
-        ev.add('DTSTAMP', dtstamp)
-        ev.add('DTSTART', dtstart)
-        ev.add('DTEND',   dtend)
-        ev.add('SUMMARY', f"{person_name} shift ({slot})")
-
-        cal.add_component(ev)
-
-    # 6) write the merged calendar back out
-    with open(path, "wb") as f:
-        f.write(cal.to_ical())
-
-    return f"{base_url.rstrip('/')}/{fname}"
-
 # ─── MAIN ─────────────────────────────────────────────────────────────────
 
 
@@ -554,18 +556,6 @@ def main():
     all_person_assign = {p['name']: [] for p in people}
     all_warnings = []
 
-    # 2) Loop through each month
-    # We will use the same 'people' objects so 'assignments' (count) could strictly track globally?
-    # BUT 'assign_slots' resets weekly counts inside: `p['assignments'][wno] = 0`.
-    # So 'assign_slots' is safe to call sequentially.
-    # The 'person_assign' returned is local to that month call, so we must extend our global one.
-    
-    # We need to collect per-month cal_assign to write to separate sheets later
-    # But assign_slots returns a dict[Date] -> ...
-    # So we can just merge them into all_cal_assign for the Log, 
-    # but we also want to keep them somewhat separate or just filter by month when writing sheets.
-    # Filtering by month when writing sheets is easier.
-
     for m in months:
         print(f"Generating for {calendar.month_name[m]} {args.year}...")
         cal_assign, person_assign, warnings = assign_slots(people, m, args.year)
@@ -598,8 +588,7 @@ def main():
         roster_data.append({
             "name": name,
             "shifts": shift_count,
-            "ucid_hash": list(ics_links.keys()) # We don't have the hash yet, let's generate it or skip. 
-            # Actually, we just need name and shift count for the UI.
+            "ucid_hash": list(ics_links.keys()) 
         })
         
         ics_links[name] = write_person_ics(

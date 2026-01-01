@@ -327,11 +327,11 @@ export default function Home() {
         <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-10 shadow-lg">
           <div className="text-center">
             <h2 className="mt-6 text-3xl font-extrabold text-gray-900">SMR Scheduler</h2>
-            <p className="mt-2 text-sm text-gray-600">Enter your GitHub Personal Access Token to continue</p>
+            <p className="mt-2 text-sm text-gray-600">Enter your Dashboard Password to continue</p>
           </div>
           <form className="mt-8 space-y-6" onSubmit={handleLogin}>
             <div>
-              <label htmlFor="token" className="sr-only">GitHub Token</label>
+              <label htmlFor="token" className="sr-only">Password</label>
               <div className="relative">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                   <Key className="h-5 w-5 text-gray-400" />
@@ -342,7 +342,7 @@ export default function Home() {
                   type="password"
                   required
                   className="block w-full rounded-md border-0 py-3 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  placeholder="ghp_..."
+                  placeholder="Enter Password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                 />

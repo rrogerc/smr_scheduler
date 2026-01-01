@@ -284,7 +284,7 @@ def solve_weekly_template(people):
             assigned = template[day][slot]
             has_senior = any(x for x in assigned if any(p['name'] == x and p['senior'] for p in people))
             if assigned and not has_senior:
-                warnings.append(f"Template {day} {slot} has {len(assigned)} people but NO SENIOR.")
+                warnings.append(f"{day} {slot} has {len(assigned)} people but NO SENIOR.")
 
     return template, warnings
 

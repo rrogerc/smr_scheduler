@@ -11,11 +11,13 @@ import datetime
 def fetch_sheet_as_df(sheet_id: str, gid: int = 0) -> pd.DataFrame:
     """
     Fetches the given Google Sheet (must be public) as a pandas DataFrame.
+    Uses XLSX export to automatically read the first sheet, ignoring GID.
     """
-    url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
+    url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx'
     resp = requests.get(url)
     resp.raise_for_status()
-    return pd.read_csv(io.BytesIO(resp.content))
+    # Read the first sheet (index 0) regardless of its name
+    return pd.read_excel(io.BytesIO(resp.content), sheet_name=0)
 
 def find_column_by_keywords(df, *keywords):
     """

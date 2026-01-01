@@ -76,7 +76,7 @@ jobs:
           # Stage generated schedule files and calendar files
           git add schedules/schedule_*.xlsx
           git add docs/ics/*.ics
-          git add docs/roster.json
+          git add docs/rosters/*.json
           # Only commit if there are staged changes
           if git diff --cached --quiet; then
             echo "No changes to commit"

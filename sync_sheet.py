@@ -38,7 +38,7 @@ def main():
     args = p.parse_args()
 
     # === CONFIGURATION ===
-    GID = 1539534942
+    GID = 0
     OUTPUT_FILE = 'availability.xlsx'
     # =======================
 

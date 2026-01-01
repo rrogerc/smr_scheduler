@@ -127,10 +127,11 @@ def assign_slots(people, month, year):
         return int(hashlib.sha256(hash_input).hexdigest(), 16)
 
     # ─── PHASE 1: MANDATORY SENIORS ───
-    # Ensure every slot has at least 1 senior
+    # Ensure every slot has at least 1 senior (Constraint: Max 2 seniors)
     for dt, slot, dayname in all_slots:
         current_assigned = cal_assign[dt][slot]
-        has_senior = any(p['senior'] for p in people if p['name'] in current_assigned)
+        seniors_assigned = [p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)]
+        has_senior = len(seniors_assigned) > 0
         
         if not has_senior:
             # Find available seniors not already assigned to this slot
@@ -177,13 +178,20 @@ def assign_slots(people, month, year):
                 # Check availability
                 if not is_available(person, dayname, slot):
                     continue
-                # Check if already assigned
-                if person['name'] in cal_assign[dt][slot]:
+                
+                # Check constraints
+                current_assigned = cal_assign[dt][slot]
+                if person['name'] in current_assigned:
+                    continue
+                if len(current_assigned) >= 5: # Max 5 people
                     continue
                 
+                seniors_in_slot = len([p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)])
+                if person['senior'] and seniors_in_slot >= 2: # Max 2 seniors
+                    continue
+
                 # We prioritize slots with fewer people to spread the load
-                # But we might also want to prioritize slots that need coverage (count < 2)
-                current_count = len(cal_assign[dt][slot])
+                current_count = len(current_assigned)
                 available_slots.append((dt, slot, current_count))
             
             if not available_slots:
@@ -212,39 +220,56 @@ def assign_slots(people, month, year):
             if monthly_counts[person['name']] >= 2:
                 people_needing_shifts.remove(person)
 
-    # ─── PHASE 3: MINIMUM COVERAGE (Target 2 people per slot) ───
-    # Ensure every slot has at least 2 people if possible
-    for dt, slot, dayname in all_slots:
-        current_assigned = cal_assign[dt][slot]
-        if len(current_assigned) < 2:
-            needed = 2 - len(current_assigned)
-            
-            # Find candidates
-            candidates = [
-                p for p in people 
-                if is_available(p, dayname, slot) 
-                and p['name'] not in current_assigned
-            ]
-            
-            if len(candidates) < needed:
-                 warnings.append(f"Only {len(current_assigned)+len(candidates)} people available for {dt} {slot} (Need 2)")
-            
-            # Sort candidates:
-            # 1. Lowest monthly count (give shifts to those who have few, even if > 2)
-            # 2. Hash
-            candidates.sort(key=lambda p: (monthly_counts[p['name']], get_hash(p, dt, slot)))
-            
-            to_add = candidates[:needed]
-            for p in to_add:
-                cal_assign[dt][slot].append(p['name'])
-                person_assign[p['name']].append((dt, slot))
-                monthly_counts[p['name']] += 1
-
-    # Check for shift counts != 2
+    # ─── PHASE 3: FILL UP TO 5 PEOPLE ───
+    # Try to fill slots up to 5 people if possible, prioritizing those with fewest shifts
+    # (Even if they already have >= 2 shifts)
+    
+    # Sort all people by shift count (ascending) to be fair
+    people_sorted = sorted(people, key=lambda p: (monthly_counts[p['name']], p['ucid']))
+    
+    # We iterate multiple passes to distribute "extra" shifts evenly
+    max_shifts_per_month = 6 # Logical cap to prevent infinite loops
+    for target_shift_count in range(2, max_shifts_per_month):
+         progress = False
+         for person in people_sorted:
+             if monthly_counts[person['name']] >= target_shift_count + 1:
+                 continue # Already has next level of shifts
+             
+             # Try to find a slot
+             available_slots = []
+             for dt, slot, dayname in all_slots:
+                 if not is_available(person, dayname, slot): continue
+                 current_assigned = cal_assign[dt][slot]
+                 
+                 # Constraints
+                 if person['name'] in current_assigned: continue
+                 if len(current_assigned) >= 5: continue # Max 5
+                 
+                 seniors_in_slot = len([p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)])
+                 if person['senior'] and seniors_in_slot >= 2: continue # Max 2 seniors
+                 
+                 # Add candidate
+                 available_slots.append((dt, slot, len(current_assigned)))
+             
+             if not available_slots: continue
+             
+             # Pick slot with fewest people (to help reach 5)
+             available_slots.sort(key=lambda x: (x[2], get_hash(person, x[0], x[1])))
+             best_dt, best_slot, _ = available_slots[0]
+             
+             cal_assign[best_dt][best_slot].append(person['name'])
+             person_assign[person['name']].append((best_dt, best_slot))
+             monthly_counts[person['name']] += 1
+             progress = True
+         
+         if not progress:
+             break 
+             
+    # Check for shift counts != 2 (Update warning to simply report count)
     for p in people:
         count = monthly_counts[p['name']]
-        if count != 2:
-            warnings.append(f"{p['name']} has {count} shifts in {calendar.month_name[month]} (Expected 2)")
+        if count < 2:
+            warnings.append(f"{p['name']} has {count} shifts in {calendar.month_name[month]} (Target minimum 2)")
 
     return cal_assign, person_assign, warnings
 
@@ -330,7 +355,7 @@ def write_person_ics(person_name, ucid, assignments, base_url, months, year, out
 # ─── CALENDAR SHEET ───────────────────────────────────────────────────────
 
 
-def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
+def build_calendar_sheet(writer, cal_assign, month, year, people, sheet_name=None):
     import datetime
     import calendar
     wb = writer.book
@@ -364,6 +389,16 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0'
     })
+    # Senior formats (Bold + Blue text)
+    senior_light = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bold': True, 'font_color': 'blue'
+    })
+    senior_dark = wb.add_format({
+        'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
+        'border': 1, 'font_size': 10, 'bg_color': '#C0C0C0', 'bold': True, 'font_color': 'blue'
+    })
+    
     time_light = wb.add_format({
         'font_name': 'Arial', 'align': 'center', 'valign': 'vcenter',
         'bold': True, 'border': 1, 'font_size': 10
@@ -390,7 +425,9 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
     cal = calendar.Calendar()
     weeks = cal.monthdays2calendar(year, month)
     row = 2
-    rows_per_day = len(TIME_SLOTS)*3
+    # Increase rows per day since we have up to 5 people
+    names_per_slot = 5
+    rows_per_day = len(TIME_SLOTS) * names_per_slot
 
     for week_idx, week in enumerate(weeks):
         start_row = row
@@ -419,8 +456,8 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
 
         # Time-Slot labels in col 0
         for si, slot in enumerate(TIME_SLOTS):
-            r0 = start_row + si*3
-            ws.merge_range(r0, 0, r0+2, 0, slot, wk_fmt)
+            r0 = start_row + si*names_per_slot
+            ws.merge_range(r0, 0, r0+names_per_slot-1, 0, slot, wk_fmt)
 
         # Assignments alternate by slot index
         for i, (day, _) in enumerate(week):
@@ -430,16 +467,26 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
             dt = datetime.date(year, month, day)
             for si, slot in enumerate(TIME_SLOTS):
                 names = cal_assign.get(dt, {}).get(slot, [])
-                fmt = cell_light if (si % 2 == 0) else cell_dark
-                # Assuming max 3 names display, if more we might just overwrite or need better UI
-                # With new alg, could have more than 3? 
-                # User said "don't need to fill 5", implies maybe max 3-4?
-                # The visual grid writes 3 rows. If we assign 4, the 4th won't show clearly.
-                # But that's a display issue, logical assignment is fine.
-                for sub in range(3):
-                    r = start_row + si*3 + sub
-                    ws.write(r, c1, names[sub] if sub <
-                             len(names) else '', fmt)
+                
+                for sub in range(names_per_slot):
+                    r = start_row + si*names_per_slot + sub
+                    
+                    if sub < len(names):
+                        name = names[sub]
+                        # Check senior status
+                        is_senior = any(p['senior'] for p in people if p['name'] == name)
+                        
+                        # Determine base format (alternating rows)
+                        if si % 2 == 0:
+                            fmt = senior_light if is_senior else cell_light
+                        else:
+                            fmt = senior_dark if is_senior else cell_dark
+                            
+                        ws.write(r, c1, name, fmt)
+                    else:
+                        # Empty cell
+                        fmt = cell_light if (si % 2 == 0) else cell_dark
+                        ws.write(r, c1, '', fmt)
 
         # compact row heights
         for r in range(start_row, start_row+rows_per_day):
@@ -450,18 +497,30 @@ def build_calendar_sheet(writer, cal_assign, month, year, sheet_name=None):
 # ─── PERSON SHEET ──────────────────────────────────────────────────────────
 
 
-def build_person_sheet(writer, person_assign, ics_links):
+def build_person_sheet(writer, person_assign, ics_links, months):
     import pandas as pd
 
     wb = writer.book
     ws = wb.add_worksheet('Shift Count')
     writer.sheets['Shift Count'] = ws
 
-    # 1) Write Name and Total Shifts via DataFrame
-    df = pd.DataFrame([
-        {'Name': name, 'Total Shifts': len(assigns)}
-        for name, assigns in person_assign.items()
-    ])
+    # Prepare data rows
+    data = []
+    for name, assigns in person_assign.items():
+        row = {'Name': name, 'Total Shifts': len(assigns)}
+        # Add columns for each month
+        for m in months:
+            m_name = calendar.month_name[m]
+            count = len([dt for dt, _ in assigns if dt.month == m])
+            row[m_name] = count
+        data.append(row)
+
+    df = pd.DataFrame(data)
+    
+    # Reorder columns: Name, [Month1, Month2...], Total Shifts
+    cols = ['Name'] + [calendar.month_name[m] for m in months] + ['Total Shifts']
+    df = df[cols] # Reorder
+    
     df.to_excel(writer, sheet_name='Shift Count', index=False)
 
     # 2) Style header row
@@ -471,7 +530,7 @@ def build_person_sheet(writer, person_assign, ics_links):
     })
     for col_idx, col_name in enumerate(df.columns):
         ws.write(0, col_idx, col_name, hdr_fmt)
-        ws.set_column(col_idx, col_idx, 20)
+        ws.set_column(col_idx, col_idx, 15 if col_idx > 0 else 20)
 
     # 3) Add Calendar URL column header
     cal_col = len(df.columns)
@@ -614,10 +673,10 @@ def main():
                 if dt.month == m
             }
             sheet_name = f"{calendar.month_name[m]} {args.year}"
-            build_calendar_sheet(writer, month_cal_assign, m, args.year, sheet_name=sheet_name)
+            build_calendar_sheet(writer, month_cal_assign, m, args.year, people, sheet_name=sheet_name)
         
         # Summary sheets
-        build_person_sheet(writer, all_person_assign, ics_links)
+        build_person_sheet(writer, all_person_assign, ics_links, months)
         build_log_sheet(writer, all_cal_assign, all_warnings)
 
     # 5) Summary output

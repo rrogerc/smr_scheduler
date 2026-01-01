@@ -185,31 +185,19 @@ def solve_weekly_template(people):
                 continue
 
             # Edge: SOURCE -> PERSON (Capacity: remaining quota)
-            # Use UID for node to handle name collisions/duplicates
             person_node = f"PERSON_{uid}"
             solver.add_edge(SOURCE, person_node, remaining_quota)
 
             for day in DAYS_OF_WEEK:
-                # Check if person is already working this day (from a previous phase)
-                # This enforces 1 shift per day across all phases and prevents duplicate slot assignments
-                # Check based on Name in template is imperfect if names collide, but template stores strings.
-                # Better: Check if UID is already assigned to this day in our internal tracking?
-                # For now, checking name in template is "okay" if names are unique enough, 
-                # but to be strict let's check our own person_counts logic or iterate template carefully.
-                
-                # Actually, let's verify against the template values.
-                if any(name in template[day][s] for s in TIME_SLOTS):
-                    continue
-
-                # Enforce 1 shift per day: PERSON -> DAY_NODE (Capacity 1)
-                day_node = f"DAY_{uid}_{day}"
-                solver.add_edge(person_node, day_node, 1)
-
                 for slot in TIME_SLOTS:
                     # Check Availability
                     if slot not in p['availability'].get(day, []):
                         continue
                     
+                    # Prevent double-booking the EXACT SAME slot across phases
+                    if name in template[day][slot]:
+                        continue
+
                     # Check Senior Limit (Max 2 seniors per slot)
                     current_seniors_in_slot = len([
                         x for x in template[day][slot] 
@@ -224,8 +212,9 @@ def solve_weekly_template(people):
                     
                     if cap > 0:
                         slot_node = f"SLOT_{day}_{slot}"
-                        # Edge: DAY_NODE -> SLOT (Capacity 1)
-                        solver.add_edge(day_node, slot_node, 1)
+                        # Edge: PERSON -> SLOT (Capacity 1)
+                        # This allows multiple slots per day as long as total matches quota
+                        solver.add_edge(person_node, slot_node, 1)
 
         # Connect Slots to Sink
         for day in DAYS_OF_WEEK:
@@ -248,22 +237,17 @@ def solve_weekly_template(people):
             
             if person_node not in solver.flow: continue
             
-            for day_node, flow1 in solver.flow[person_node].items():
-                if flow1 > 0 and day_node.startswith("DAY_"):
-                    # Extract day
-                    parts = day_node.split('_') # DAY, uid..., DayName
-                    # UID might have underscores. Day is always last.
-                    day = parts[-1] 
+            # Trace flow: PERSON -> SLOT
+            for slot_node, flow_val in solver.flow[person_node].items():
+                if flow_val > 0 and slot_node.startswith("SLOT_"):
+                    # Found assignment
+                    parts = slot_node.split('_')
+                    day = parts[1]
+                    slot = parts[2]
                     
-                    for slot_node, flow2 in solver.flow[day_node].items():
-                        if flow2 > 0 and slot_node.startswith("SLOT_"):
-                            # Found assignment
-                            slot_parts = slot_node.split('_')
-                            slot = slot_parts[2] # SLOT, Day, Slot
-                            
-                            template[day][slot].append(name)
-                            person_counts[uid] += 1
-                            assigned_count += 1
+                    template[day][slot].append(name)
+                    person_counts[uid] += 1
+                    assigned_count += 1
                             
         print(f"    - {description}: Assigned {assigned_count} shifts.")
 

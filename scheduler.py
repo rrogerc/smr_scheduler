@@ -220,51 +220,6 @@ def assign_slots(people, month, year):
             if monthly_counts[person['name']] >= 2:
                 people_needing_shifts.remove(person)
 
-    # ─── PHASE 3: FILL UP TO 5 PEOPLE ───
-    # Try to fill slots up to 5 people if possible, prioritizing those with fewest shifts
-    # (Even if they already have >= 2 shifts)
-    
-    # Sort all people by shift count (ascending) to be fair
-    people_sorted = sorted(people, key=lambda p: (monthly_counts[p['name']], p['ucid']))
-    
-    # We iterate multiple passes to distribute "extra" shifts evenly
-    max_shifts_per_month = 6 # Logical cap to prevent infinite loops
-    for target_shift_count in range(2, max_shifts_per_month):
-         progress = False
-         for person in people_sorted:
-             if monthly_counts[person['name']] >= target_shift_count + 1:
-                 continue # Already has next level of shifts
-             
-             # Try to find a slot
-             available_slots = []
-             for dt, slot, dayname in all_slots:
-                 if not is_available(person, dayname, slot): continue
-                 current_assigned = cal_assign[dt][slot]
-                 
-                 # Constraints
-                 if person['name'] in current_assigned: continue
-                 if len(current_assigned) >= 5: continue # Max 5
-                 
-                 seniors_in_slot = len([p for p in current_assigned if any(x['name'] == p and x['senior'] for x in people)])
-                 if person['senior'] and seniors_in_slot >= 2: continue # Max 2 seniors
-                 
-                 # Add candidate
-                 available_slots.append((dt, slot, len(current_assigned)))
-             
-             if not available_slots: continue
-             
-             # Pick slot with fewest people (to help reach 5)
-             available_slots.sort(key=lambda x: (x[2], get_hash(person, x[0], x[1])))
-             best_dt, best_slot, _ = available_slots[0]
-             
-             cal_assign[best_dt][best_slot].append(person['name'])
-             person_assign[person['name']].append((best_dt, best_slot))
-             monthly_counts[person['name']] += 1
-             progress = True
-         
-         if not progress:
-             break 
-             
     # Check for shift counts != 2 (Update warning to simply report count)
     for p in people:
         count = monthly_counts[p['name']]

@@ -163,7 +163,7 @@ export default function Home() {
     setMessage(null);
     try {
       const octokit = new Octokit({ auth: token });
-      await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
+      const response = await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
         owner: REPO_OWNER,
         repo: REPO_NAME,
         workflow_id: 'refresh_roster.yml',
@@ -174,10 +174,21 @@ export default function Home() {
         },
       });
 
-      setMessage({ type: 'success', text: `Roster refresh triggered for ${rosterTerm} ${rosterYear}. It may take a minute.` });
+      if (response.status === 204) {
+        const msg = `Roster refresh triggered for ${rosterTerm} ${rosterYear}. It may take a minute.`;
+        setMessage({ type: 'success', text: msg });
+        alert(msg);
+      } else {
+        throw new Error(`Unexpected status: ${response.status}`);
+      }
     } catch (error: any) {
       console.error('Error triggering roster refresh:', error);
-      setMessage({ type: 'error', text: `Failed to refresh roster: ${error.message || 'Unknown error'}` });
+      let errMsg = error.message || 'Unknown error';
+      if (error.status === 403 || error.status === 404) {
+        errMsg = "Failed to trigger. Please ensure your Token has the 'workflow' scope enabled.";
+      }
+      setMessage({ type: 'error', text: errMsg });
+      alert(errMsg);
     } finally {
       setRefreshingRoster(false);
     }
@@ -234,7 +245,7 @@ export default function Home() {
     setMessage(null);
     try {
       const octokit = new Octokit({ auth: token });
-      await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
+      const response = await octokit.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
         owner: REPO_OWNER,
         repo: REPO_NAME,
         workflow_id: WORKFLOW_ID,
@@ -245,10 +256,21 @@ export default function Home() {
         },
       });
 
-      setMessage({ type: 'success', text: `Successfully triggered schedule generation for ${selectedTerm} ${selectedYear}. It may take a few minutes to appear.` });
+      if (response.status === 204) {
+        const msg = `Successfully triggered schedule generation for ${selectedTerm} ${selectedYear}. It may take 1-2 minutes to appear in the list.`;
+        setMessage({ type: 'success', text: msg });
+        alert(msg); // Immediate feedback
+      } else {
+        throw new Error(`Unexpected status: ${response.status}`);
+      }
     } catch (error: any) {
       console.error('Error triggering workflow:', error);
-      setMessage({ type: 'error', text: `Failed to trigger generation: ${error.message || 'Unknown error'}` });
+      let errMsg = error.message || 'Unknown error';
+      if (error.status === 403 || error.status === 404) {
+        errMsg = "Failed to trigger. Please ensure your Token has the 'workflow' scope enabled.";
+      }
+      setMessage({ type: 'error', text: errMsg });
+      alert(errMsg);
     } finally {
       setGenerating(false);
     }
